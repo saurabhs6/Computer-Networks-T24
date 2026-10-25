@@ -1,0 +1,305 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OTA-FL Power Control Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: sticky control strip over a tabbed lab; one chart or panel per tab, numbers always beside it.
+   Direction: bench-instrument calm. Cool paper / graphite, one blue accent, method colours kept apart from the accent. */
+:root{
+  --bg:#f4f6f8; --surface:#ffffff; --surface2:#eceff3; --line:#d6dce4; --fg:#16202b; --muted:#566475;
+  --accent:#0a5fb4; --accent-fg:#ffffff; --good:#17794a; --warn:#a86100; --bad:#b3261e;
+  --c-M1:#3b4654; --c-M2:#1f6fd6; --c-M3:#d4401f; --c-M1-BF:#1d8a55; --c-M2-EIG:#7a4fc4; --c-OPT:#b87500; --c-IDEAL:#7b8794;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161b; --surface:#1a2028; --surface2:#222a34; --line:#323c49; --fg:#e8edf2; --muted:#9aa8b8;
+  --accent:#5aa2f0; --accent-fg:#0b1118; --good:#4fcf8e; --warn:#f0b04a; --bad:#ff8a80;
+  --c-M1:#aab4c2; --c-M2:#5aa2f0; --c-M3:#ff7a59; --c-M1-BF:#4fcf8e; --c-M2-EIG:#b794f6; --c-OPT:#f0b04a; --c-IDEAL:#8896a6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161b; --surface:#1a2028; --surface2:#222a34; --line:#323c49; --fg:#e8edf2; --muted:#9aa8b8;
+  --accent:#5aa2f0; --accent-fg:#0b1118; --good:#4fcf8e; --warn:#f0b04a; --bad:#ff8a80;
+  --c-M1:#aab4c2; --c-M2:#5aa2f0; --c-M3:#ff7a59; --c-M1-BF:#4fcf8e; --c-M2-EIG:#b794f6; --c-OPT:#f0b04a; --c-IDEAL:#8896a6; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px}
+.wrap{max-width:1120px;margin:0 auto}
+h1,h2,h3{margin:0;text-wrap:balance}
+header.top{padding:22px 0 14px;display:flex;gap:16px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(24px,4vw,34px);font-weight:600;letter-spacing:-.01em;margin-top:4px}
+.sub{color:var(--muted);max-width:62ch;margin-top:6px}
+.who{font-family:var(--f-mono);font-size:12px;color:var(--muted);text-align:right}
+.themebtn{font:inherit;font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;margin-top:6px}
+.strip{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-block:1px solid var(--line);padding:12px 0;
+  display:grid;grid-template-columns:minmax(260px,1.1fr) 2fr;gap:14px 28px;align-items:center}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.ctl label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:6px}
+.ctl output{font-family:var(--f-mono);color:var(--fg);font-weight:500}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:13px;color:var(--fg);background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:4px 11px 4px 9px;cursor:pointer}
+.chip i{width:10px;height:10px;border-radius:50%;background:var(--c);display:block}
+.chip[aria-pressed=false]{opacity:.45}
+.chip[aria-pressed=false] i{background:transparent;box-shadow:inset 0 0 0 2px var(--c)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+nav.tabs{display:flex;gap:2px;margin-top:16px;overflow-x:auto;border-bottom:1px solid var(--line)}
+nav.tabs button{font:inherit;font-size:14px;color:var(--muted);background:none;border:0;border-bottom:2px solid transparent;padding:9px 14px;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-selected=true]{color:var(--fg);border-bottom-color:var(--accent);font-weight:500}
+.panel{padding-top:18px}
+.badge{display:inline-block;font-family:var(--f-mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 7px;margin-left:8px;vertical-align:middle}
+.two{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h3{font-size:15px;font-weight:600;margin-bottom:4px}
+.note{color:var(--muted);font-size:13px;margin:4px 0 0}
+svg.chart{width:100%;height:auto;display:block;touch-action:none}
+svg text{font-family:var(--f-mono);font-size:11px;fill:var(--muted)}
+.tip{font-family:var(--f-mono);font-size:12px;color:var(--fg);background:var(--surface2);border-radius:6px;padding:8px 10px;margin-top:8px;min-height:3.2em}
+.tip b{font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:500;color:var(--muted);font-size:12px}
+td.num{font-family:var(--f-mono)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:var(--c)}
+.tblwrap{overflow-x:auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.mc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;border-top:3px solid var(--c)}
+.mc .nm{font-weight:600;font-size:14px}.mc .ds{color:var(--muted);font-size:12px;margin-bottom:8px}
+.mc .big{font-family:var(--f-mono);font-size:26px;font-weight:500;letter-spacing:-.02em}
+.mc dl{margin:8px 0 0;display:grid;grid-template-columns:auto auto;gap:2px 10px;font-size:12px}
+.mc dt{color:var(--muted)}.mc dd{margin:0;text-align:right;font-family:var(--f-mono)}
+.bar{height:6px;background:var(--surface2);border-radius:3px;margin-top:6px;overflow:hidden}.bar span{display:block;height:100%;background:var(--c)}
+.finds{margin:16px 0 0;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.finds .card p{margin:4px 0 0;font-size:13.5px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.btn{font:inherit;font-size:13px;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer}
+.btn.pri{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:12px}
+.stat div{background:var(--surface2);border-radius:8px;padding:9px 11px}
+.stat span{display:block;font-size:11px;color:var(--muted);font-family:var(--f-mono);text-transform:uppercase;letter-spacing:.05em}
+.stat b{font-family:var(--f-mono);font-weight:500;font-size:18px}
+footer{margin-top:28px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px}
+@media (max-width:820px){.strip{grid-template-columns:1fr;position:static}.two{grid-template-columns:1fr}.who{text-align:left}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+
+</head><body><div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Team 24 · Communication Networks · VIT SCOPE</div>
+    <h1>Over-the-air federated learning under fading</h1>
+    <p class="sub">Compare three power-control methods on the same simulated network: 50 devices, Rayleigh fading, non-IID digit data. Every number comes from the paper's simulation (10 seeds).</p>
+  </div>
+  <div class="who">Saurabh Suresh · 24BCE2750<br>Advaith Sivakumar · 24BCE2715<br><button class="themebtn" id="themeBtn" type="button">Switch theme</button></div>
+</header>
+
+<section class="strip" aria-label="Controls">
+  <div class="ctl">
+    <label for="snr"><span>Nominal SNR (P<sub>max</sub>/σ²)</span> <output id="snrOut"></output></label>
+    <input id="snr" type="range" min="0" max="9" step="1" value="2">
+  </div>
+  <div class="chips" id="chips" role="group" aria-label="Methods shown"></div>
+</section>
+
+<nav class="tabs" id="tabs" role="tablist"></nav>
+<main class="panel" id="panel"></main>
+
+<footer>
+  Setup: scikit-learn digits (1,347 train / 450 test), softmax regression (650 parameters), Dirichlet 0.5 label skew, K = 50 devices, 100 rounds per run, ten seeds,
+  channel trace indices 400–499 for reporting. SNR is defined on normalised symbols, so −35 to −15 dB is the interesting range. Accuracy is the mean of the last ten rounds.
+  M2+EIG and OPT are controls added in Section 3.5 of the paper; OPT is our own implementation of the threshold structure of Cao et al. (2020) and is not their algorithm.
+</footer>
+</div>
+
+<script>
+const D = {"E":{"snrs":[-35,-30,-25,-20,-15,-10,0,10,20,30],"M1":{"acc":[0.2750666666666666,0.4676444444444444,0.6822666666666668,0.8277777777777778,0.8957555555555554,0.9231999999999999,0.9380444444444442,0.9382888888888887,0.9384888888888888,0.9383555555555555],"acc_std":[0.12712218288998994,0.1999961728028876,0.1978557898577823,0.12047314131281618,0.05793312449350758,0.023701851779508253,0.009900741959975775,0.010526861584290698,0.010620269462532037,0.010434983894999039],"mse":[2720.330439540593,394.54348220015027,66.95176494883364,15.130148969623837,4.4854041957766695,1.3940132409734225,0.13860793034928243,0.013863837202231595,0.0013866821921495458,0.00013867948858149634],"part":[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],"rx":[-54.23375799723577,-49.26180612267742,-44.2794490093547,-39.34237034377572,-34.344697269806495,-29.348058817446326,-19.356984485968947,-9.357410986674854,0.6436777446868511,10.643994670475868]},"M2":{"acc":[0.8746,0.9219333333333333,0.9343777777777778,0.9372222222222222,0.9380444444444445,0.9385999999999999,0.9383999999999999,0.9384666666666666,0.9385333333333332,0.9385555555555554],"acc_std":[0.02233305693582419,0.014742229591663984,0.012666666666666661,0.01146330700135904,0.009676240469812122,0.009293566073922895,0.009625070145647889,0.010088497300281055,0.010095837059200504,0.009900741959975779],"mse":[4.522893140804433,1.139871606937874,0.3367207787898788,0.10574635998946764,0.03501865162303812,0.012891377114388642,0.0037185805949675145,0.0028030515752059905,0.002711566288593374,0.002702429085093541],"part":[0.78016,0.78016,0.78016,0.78016,0.78016,0.78016,0.78016,0.78016,0.78016,0.78016],"rx":[-42.996296821654695,-37.97633040276796,-32.94775255414905,-27.930333987344056,-22.923466470307503,-17.92026152798131,-7.917036610944376,2.083964378442234,12.08430914395428,22.084422073379297]},"M3":{"acc":[0.8986444444444445,0.9270666666666665,0.9348888888888889,0.9375777777777777,0.9385777777777777,0.9387555555555555,0.9385777777777775,0.9384888888888889,0.9384444444444444,0.9384888888888889],"acc_std":[0.013843927224153358,0.012422599874998835,0.011792443699041429,0.011640711869963382,0.009828153061109339,0.010234292390817308,0.010432617417160464,0.010009871670715756,0.010009871670715756,0.010009871670715756],"mse":[2.8456374604977497,0.7667008537565423,0.23118384614059653,0.07380876710937016,0.02546552464815934,0.010359381643079535,0.0041058581860653216,0.003481627031385435,0.003418993314315351,0.0034126480515426646],"part":[0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999,0.7409399999999999],"rx":[-40.924989367703404,-35.89563709738391,-30.855185389472485,-25.827222473416636,-20.81138528232906,-15.802951346616576,-5.7961177911907535,4.205943004821997,14.206619683178845,24.20683446049122]},"M1-BF":{"acc":[0.8329555555555557,0.9094888888888889,0.9299333333333333,0.936422222222222,0.9377777777777776,0.938422222222222,0.9385333333333332,0.9381777777777778,0.9381333333333333,0.9381999999999999],"acc_std":[0.032383504412349995,0.01707499796648762,0.013843927224153339,0.011809182449410162,0.01002712370904755,0.010195617552848429,0.010554970744033726,0.01038517461826484,0.01038517461826484,0.01024152766382483],"mse":[8.785609430786096,1.9553296138392477,0.5526713465145253,0.16832561759940012,0.052524224849777104,0.016524339667710476,0.001647401408823786,0.0001646296373795483,1.646000582472773e-05,1.6459111805787368e-06],"part":[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],"rx":[-45.62673497972185,-40.625377722107885,-35.59146215638398,-30.571585353582595,-25.56297842094989,-20.557833962387548,-10.55372382599291,-0.5525241277972115,9.447829112330396,19.447945748481317]},"M2-EIG":{"acc":[0.9000666666666668,0.9276666666666668,0.9355111111111111,0.937711111111111,0.9385333333333333,0.9384222222222223,0.9382222222222222,0.9381999999999999,0.9381555555555554,0.9381999999999998],"acc_std":[0.014922019523732927,0.014070369882912647,0.011623730516108466,0.0101737983486752,0.009760085002665677,0.010508080371143902,0.010301623987999359,0.010205300002848935,0.010205300002848935,0.010205300002848935],"mse":[2.7312196514329425,0.7414467881446847,0.22545095652409683,0.07280802891080645,0.025666516604095836,0.01089441065092769,0.004775229390671207,0.004166282186928056,0.004105942691179552,0.004100074936242681],"part":[0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997,0.7026399999999997],"rx":[-40.29207431189397,-35.274532007770766,-30.257473087285167,-25.24435189039798,-20.23656805388069,-15.232199540593772,-5.228740896408209,4.772249038352169,14.772549923224762,24.77264596674896]},"OPT":{"acc":[0.8993333333333334,0.9030222222222223,0.9067777777777778,0.9207333333333334,0.9296444444444445,0.9353333333333333,0.9382666666666666,0.9382222222222222,0.9382444444444443,0.9382666666666666],"acc_std":[0.01332592386716885,0.01152345969996816,0.0102342923908173,0.010470416879457557,0.010758860832809055,0.0112084624114831,0.010804662916571754,0.01060165372611252,0.010185925898991878,0.01024152766382483],"mse":[0.09177034732527471,0.06827674734863681,0.05465527094904424,0.021146647583810872,0.008283735201009607,0.003711251559003682,0.0009519700700063252,0.0002763111753539472,7.830335559298615e-05,1.8242845126229462e-05],"part":[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],"rx":[-35.04033064242072,-30.040330642420724,-25.0403792863627,-20.181743353035724,-16.16702561031474,-12.868557201230692,-7.113472930356641,-1.6297004729880515,4.0883146977963145,11.451918224736888]},"csi":{"eps":[0.0,0.05,0.1,0.2,0.3,0.4],"M2-EIG":{"acc":[0.9355111111111111,0.9359333333333334,0.9352444444444444,0.9346444444444444,0.9341111111111109,0.9323777777777776],"mse":[0.22545095652409683,0.23892904870370535,0.2532942162468539,0.28804472623442157,0.32684875977283107,0.4147000981462509]},"OPT":{"acc":[0.9067777777777778,0.9057333333333333,0.9051333333333332,0.9045555555555556,0.9041111111111112,0.9039777777777778],"mse":[0.05465527094904424,0.056254911046294945,0.05759658469598165,0.059868563009630484,0.06182906649127747,0.06341741020148974]}},"rule":{"20":{"grid":[0.0,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.2,1.5],"mse":[1354.07208329902,3.624802362208649,2.229967482193217,1.6200323160619396,1.456589040764618,1.3684885525835722,1.4005488960818635,1.5942372305257007,2.029927981299513,2.98019687573492,7.737502718072783,30.53739709196173],"acc":[0.5736888888888889,0.8896222222222221,0.9059777777777777,0.9158000000000002,0.9197333333333333,0.9206222222222221,0.9191777777777776,0.916422222222222,0.9101333333333332,0.9006222222222224,0.850288888888889,0.6691777777777778],"part":[1.0,0.9630999999999998,0.9157000000000001,0.8536999999999999,0.7797000000000002,0.69825,0.6151000000000001,0.5295,0.44609999999999994,0.3657999999999999,0.23665000000000003,0.10350000000000001],"emp_mse_opt":0.6,"emp_acc_opt":0.6,"theory":0.6782141070535268},"50":{"grid":[0.0,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.2,1.5],"mse":[66.95176494883364,0.8227912704888349,0.5253792429739247,0.4070442374324417,0.3367207787898788,0.3200185209720531,0.3269127532507493,0.3515535335377917,0.40925575248111706,0.5092859796086918,0.9603016874752635,5.069009219894303],"acc":[0.6822666666666668,0.9270222222222222,0.9299777777777779,0.9323333333333335,0.9343777777777778,0.933311111111111,0.9336222222222222,0.9335333333333333,0.9316666666666666,0.9298666666666666,0.9229777777777777,0.8655777777777779],"part":[1.0,0.9631199999999999,0.9163,0.85514,0.78016,0.6993799999999998,0.61412,0.5290800000000001,0.44628000000000007,0.36852,0.23586,0.10542],"emp_mse_opt":0.6,"emp_acc_opt":0.5,"theory":0.6957728864432217},"100":{"grid":[0.0,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.2,1.5],"mse":[9.670452461686912,0.31393706837011026,0.18570693313712092,0.14113324611457276,0.1155269338638297,0.10786998382126468,0.11085717081597479,0.11851266443621693,0.13742859878107658,0.16629218458340392,0.29704798375946206,1.111297266153271],"acc":[0.8433999999999999,0.9335111111111111,0.9357333333333333,0.9356222222222224,0.9362666666666668,0.9364888888888888,0.9362,0.9368444444444444,0.9361555555555556,0.9358666666666666,0.9337111111111112,0.9230222222222222],"part":[1.0,0.9610399999999999,0.9154700000000001,0.85444,0.7808200000000001,0.7006499999999999,0.61522,0.5296900000000001,0.44667000000000007,0.36801,0.23574,0.10549],"emp_mse_opt":0.6,"emp_acc_opt":0.8,"theory":0.7016258129064533}}},"R":{"snr":{"IDEAL_acc":0.9381555555555554},"curve":{"IDEAL":[0.5891111111111111,0.8055555555555554,0.8362222222222222,0.8573333333333333,0.8695555555555554,0.8757777777777778,0.8813333333333333,0.8857777777777777,0.8908888888888888,0.8942222222222223,0.896888888888889,0.899111111111111,0.8997777777777778,0.9008888888888889,0.9028888888888889,0.9044444444444444,0.9057777777777778,0.9071111111111112,0.9075555555555554,0.9084444444444445,0.9091111111111111,0.9095555555555557,0.9106666666666667,0.9117777777777778,0.913111111111111,0.9133333333333333,0.913111111111111,0.9135555555555556,0.9148888888888888,0.9153333333333331,0.9164444444444444,0.9171111111111111,0.9177777777777777,0.9191111111111111,0.9195555555555555,0.9199999999999999,0.9206666666666665,0.9217777777777778,0.9217777777777778,0.9222222222222223,0.9224444444444446,0.9233333333333332,0.9242222222222221,0.9244444444444444,0.9248888888888889,0.9251111111111111,0.9262222222222223,0.9266666666666667,0.9271111111111112,0.9275555555555556,0.9277777777777778,0.9280000000000002,0.9286666666666668,0.928888888888889,0.9291111111111112,0.9293333333333335,0.93,0.9306666666666666,0.931111111111111,0.9315555555555555,0.9319999999999998,0.9326666666666666,0.9328888888888889,0.9333333333333333,0.9335555555555555,0.9335555555555555,0.9339999999999999,0.9339999999999999,0.9342222222222221,0.9342222222222221,0.9342222222222221,0.9346666666666665,0.9353333333333331,0.9357777777777777,0.9357777777777777,0.9362222222222222,0.9366666666666668,0.936888888888889,0.936888888888889,0.936888888888889,0.9377777777777778,0.9377777777777778,0.9377777777777776,0.9375555555555554,0.9375555555555554,0.9377777777777776,0.9373333333333331,0.9373333333333331,0.9375555555555554,0.938,0.9377777777777776,0.9377777777777776,0.938,0.9377777777777776,0.9382222222222222,0.9384444444444444,0.9382222222222222,0.9382222222222222,0.9384444444444444,0.9386666666666666],"M1":[0.18,0.2735555555555555,0.3157777777777778,0.3711111111111111,0.378,0.4402222222222222,0.41755555555555557,0.38355555555555554,0.38888888888888895,0.4133333333333333,0.44511111111111107,0.4344444444444445,0.47733333333333333,0.4611111111111111,0.49044444444444435,0.4488888888888889,0.4344444444444445,0.42377777777777775,0.4017777777777777,0.4133333333333334,0.4373333333333334,0.462888888888889,0.4722222222222222,0.48355555555555557,0.49977777777777777,0.5137777777777777,0.5104444444444445,0.5122222222222222,0.5428888888888889,0.5335555555555554,0.5493333333333335,0.5595555555555556,0.5506666666666666,0.558,0.5713333333333332,0.5724444444444445,0.5986666666666667,0.6031111111111112,0.6064444444444445,0.6095555555555555,0.6004444444444446,0.5944444444444443,0.6193333333333334,0.6253333333333333,0.6088888888888888,0.6251111111111111,0.6331111111111112,0.6202222222222222,0.6337777777777778,0.6404444444444445,0.6395555555555555,0.6417777777777778,0.6266666666666666,0.642,0.6497777777777778,0.6555555555555557,0.6371111111111111,0.6477777777777778,0.654,0.6544444444444444,0.6646666666666666,0.6482222222222223,0.6673333333333333,0.6555555555555557,0.6679999999999999,0.6748888888888888,0.6788888888888888,0.6804444444444444,0.6880000000000001,0.6904444444444444,0.6922222222222223,0.6968888888888889,0.692,0.6915555555555555,0.7020000000000002,0.7017777777777778,0.6913333333333334,0.7022222222222223,0.7111111111111111,0.702,0.7128888888888889,0.7135555555555556,0.7204444444444446,0.7226666666666667,0.7259999999999999,0.7291111111111112,0.7302222222222221,0.7057777777777778,0.719111111111111,0.7235555555555556,0.725111111111111,0.7282222222222222,0.7344444444444445,0.6697777777777778,0.6613333333333333,0.6715555555555556,0.6744444444444444,0.6571111111111112,0.6462222222222223,0.6544444444444444],"M2":[0.31066666666666665,0.5102222222222221,0.6333333333333334,0.6684444444444444,0.7388888888888888,0.7779999999999999,0.8097777777777777,0.8166666666666668,0.8317777777777777,0.8386666666666667,0.8491111111111111,0.8686666666666666,0.8693333333333333,0.8744444444444444,0.8855555555555557,0.8846666666666667,0.8837777777777778,0.8915555555555557,0.8900000000000002,0.8942222222222223,0.898,0.8962222222222221,0.8993333333333334,0.9008888888888891,0.9,0.9026666666666665,0.9093333333333333,0.9071111111111112,0.9082222222222223,0.9071111111111112,0.908,0.9073333333333332,0.9075555555555557,0.9126666666666667,0.9133333333333333,0.9111111111111111,0.9126666666666665,0.9111111111111111,0.9146666666666666,0.9137777777777778,0.9164444444444444,0.9171111111111111,0.9177777777777777,0.9144444444444446,0.9182222222222223,0.9155555555555555,0.9186666666666665,0.9195555555555556,0.9202222222222222,0.9179999999999999,0.9199999999999999,0.9197777777777777,0.9217777777777778,0.922,0.9215555555555557,0.9222222222222223,0.922,0.9255555555555555,0.9248888888888889,0.9235555555555555,0.9259999999999999,0.9257777777777779,0.9248888888888886,0.9257777777777777,0.9253333333333333,0.926888888888889,0.9286666666666668,0.9286666666666665,0.9286666666666668,0.928888888888889,0.9295555555555556,0.9297777777777776,0.9313333333333332,0.929111111111111,0.9306666666666666,0.932,0.9317777777777778,0.9342222222222221,0.9328888888888889,0.9328888888888889,0.9337777777777777,0.9328888888888889,0.9337777777777779,0.9328888888888889,0.9322222222222221,0.9326666666666668,0.9348888888888889,0.9339999999999999,0.9335555555555555,0.9317777777777778,0.9335555555555555,0.9333333333333332,0.9339999999999999,0.9357777777777778,0.9344444444444445,0.9342222222222223,0.9328888888888889,0.9348888888888889,0.9353333333333333,0.9353333333333333],"M3":[0.28755555555555556,0.532,0.5982222222222222,0.7091111111111111,0.7651111111111112,0.797111111111111,0.8135555555555556,0.8395555555555555,0.8473333333333333,0.8548888888888888,0.8613333333333333,0.8757777777777779,0.8697777777777776,0.880888888888889,0.885111111111111,0.8913333333333334,0.898,0.8986666666666666,0.8997777777777779,0.9000000000000001,0.9033333333333333,0.8997777777777778,0.9026666666666667,0.9046666666666665,0.9066666666666668,0.9048888888888887,0.9097777777777777,0.9099999999999999,0.9073333333333334,0.9091111111111113,0.9099999999999999,0.9117777777777777,0.9122222222222222,0.9115555555555555,0.9148888888888888,0.915111111111111,0.9162222222222223,0.9164444444444445,0.9177777777777777,0.9168888888888889,0.9173333333333332,0.9195555555555555,0.9195555555555556,0.9213333333333333,0.9222222222222223,0.9204444444444443,0.9193333333333333,0.9204444444444444,0.920888888888889,0.920888888888889,0.9215555555555556,0.9228888888888889,0.9239999999999998,0.9253333333333333,0.9237777777777778,0.9244444444444445,0.924,0.9257777777777777,0.9268888888888889,0.9264444444444445,0.9271111111111109,0.9266666666666667,0.9255555555555557,0.926888888888889,0.9259999999999999,0.9271111111111112,0.9268888888888889,0.9279999999999999,0.929111111111111,0.9284444444444443,0.928888888888889,0.9286666666666669,0.9282222222222222,0.9308888888888889,0.9295555555555554,0.9326666666666666,0.9322222222222223,0.9324444444444444,0.9322222222222223,0.9337777777777777,0.932,0.9324444444444445,0.9304444444444444,0.9331111111111111,0.9331111111111111,0.9328888888888889,0.9339999999999999,0.9353333333333333,0.9331111111111111,0.9337777777777777,0.9335555555555555,0.9346666666666668,0.933111111111111,0.9362222222222222,0.9355555555555556,0.9351111111111111,0.9357777777777778,0.9351111111111111,0.9346666666666665,0.9351111111111112],"M1-BF":[0.31400000000000006,0.5744444444444443,0.632888888888889,0.6477777777777778,0.7068888888888889,0.7555555555555556,0.7862222222222222,0.8022222222222222,0.8304444444444444,0.8275555555555556,0.8391111111111111,0.847111111111111,0.8588888888888888,0.8695555555555556,0.8742222222222221,0.8786666666666667,0.8802222222222221,0.8517777777777777,0.8513333333333334,0.8695555555555554,0.8802222222222221,0.8851111111111113,0.8846666666666667,0.8895555555555555,0.8911111111111112,0.8940000000000001,0.8975555555555556,0.8988888888888887,0.9017777777777777,0.8988888888888888,0.8964444444444444,0.9008888888888889,0.9006666666666666,0.9024444444444443,0.9053333333333334,0.9057777777777778,0.9073333333333334,0.9068888888888889,0.9122222222222224,0.910888888888889,0.9113333333333333,0.9126666666666665,0.9133333333333333,0.9122222222222224,0.9133333333333333,0.911777777777778,0.912222222222222,0.914,0.9157777777777778,0.916,0.9168888888888889,0.9197777777777777,0.9195555555555556,0.9179999999999999,0.9197777777777777,0.9179999999999999,0.9211111111111112,0.9197777777777778,0.9213333333333333,0.9195555555555558,0.9211111111111112,0.9222222222222222,0.9215555555555556,0.9226666666666666,0.9228888888888889,0.9228888888888889,0.9226666666666669,0.9242222222222223,0.9251111111111111,0.9242222222222223,0.9242222222222223,0.9235555555555557,0.9253333333333333,0.9264444444444445,0.9259999999999999,0.9253333333333333,0.9259999999999999,0.9266666666666665,0.9273333333333333,0.9273333333333333,0.9255555555555555,0.9275555555555555,0.9275555555555556,0.9282222222222222,0.9273333333333336,0.9273333333333336,0.9264444444444443,0.9284444444444443,0.9286666666666668,0.9286666666666665,0.929111111111111,0.9293333333333331,0.9302222222222222,0.9302222222222222,0.9299999999999999,0.9317777777777778,0.93,0.9297777777777776,0.9293333333333333,0.9295555555555556]},"csi":{"eps":[0.0,0.05,0.1,0.2,0.3,0.4],"M1":{"acc":[0.6822666666666668,0.7889555555555556,0.736911111111111,0.7322666666666666,0.7050888888888889,0.6243111111111111],"mse":[66.95176494883364,16.164751054827192,27.58328581009125,26.624969923107372,29.865945237671834,714.4128208926542]},"M2":{"acc":[0.9343777777777778,0.9328,0.9329333333333333,0.932,0.9316222222222221,0.9294888888888888],"mse":[0.3367207787898788,0.36216266592674323,0.3717614859670831,0.43042213512160943,0.4765524907801111,0.5755001465377813]},"M3":{"acc":[0.9348888888888889,0.9356,0.9355555555555556,0.9343111111111112,0.9329555555555556,0.9321555555555555],"mse":[0.23118384614059653,0.2421905453837043,0.25329827562741214,0.290075377124033,0.3572491322363182,0.44886973488781456]},"M1-BF":{"acc":[0.9299333333333333,0.9234888888888889,0.9259777777777778,0.9207333333333334,0.9085111111111113,0.8939777777777778],"mse":[0.5526713465145253,1.5684135349761126,0.7557709204424589,1.2266580710972346,2.71421035014382,3.218112349371298]}}}};
+const SNRS = D.E.snrs;
+const METHODS = [
+  {id:'M1',    name:'M1',     long:'Full channel inversion', key:'M1'},
+  {id:'M2',    name:'M2',     long:'Truncated inversion', key:'M2'},
+  {id:'M3',    name:'M3',     long:'Beamforming + truncation', key:'M3'},
+  {id:'M1-BF', name:'M1+BF',  long:'Full inversion, 4 antennas', key:'M1-BF'},
+  {id:'M2-EIG',name:'M2+EIG', long:'Truncation, fixed combiner', key:'M2-EIG'},
+  {id:'OPT',   name:'OPT',    long:'Structure of Cao et al. [7]', key:'OPT'},
+];
+const on = Object.fromEntries(METHODS.map(m=>[m.id, ['M1','M2','M3'].includes(m.id)]));
+const st = {tab:'overview', snr:2, K:'50', hi:6, round:100, playing:false, ch:{seed:7, th:0.7, K:50}};
+const $ = s=>document.querySelector(s);
+const col = id => `var(--c-${id})`;
+const pct = x => (100*x).toFixed(1);
+const fmtMSE = x => x>=100? x.toFixed(0) : x>=10? x.toFixed(1) : x>=1? x.toFixed(2) : x>=0.01? x.toFixed(3) : x.toExponential(1);
+const sel = () => METHODS.filter(m=>on[m.id]);
+
+/* ---------- generic SVG line chart ---------- */
+function lineChart(host, o){
+  const W=640,H=340,m={l:58,r:16,t:14,b:46};
+  const xs=o.series.flatMap(s=>s.x), xmin=o.xmin??Math.min(...xs), xmax=o.xmax??Math.max(...xs);
+  const ys=o.series.flatMap(s=>s.y.concat(s.lo||[],s.hi||[])).filter(v=>isFinite(v)&&(!o.log||v>0));
+  let ymin=o.ymin??Math.min(...ys), ymax=o.ymax??Math.max(...ys);
+  if(o.log){ymin=Math.pow(10,Math.floor(Math.log10(ymin)));ymax=Math.pow(10,Math.ceil(Math.log10(ymax)));}
+  else if(o.ymin===undefined){const p=(ymax-ymin)*.06||1;ymin-=p;ymax+=p;}
+  const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const Y=v=>{const t=o.log?(Math.log10(v)-Math.log10(ymin))/(Math.log10(ymax)-Math.log10(ymin)):(v-ymin)/(ymax-ymin);return H-m.b-t*(H-m.t-m.b)};
+  let g='';
+  const yt=o.log?[]:niceTicks(ymin,ymax,5);
+  if(o.log){for(let p=Math.log10(ymin);p<=Math.log10(ymax)+1e-9;p++)yt.push(Math.pow(10,p));}
+  yt.forEach(v=>{g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end">${o.yfmt?o.yfmt(v):v}</text>`});
+  const xt=o.xticks||niceTicks(xmin,xmax,6);
+  xt.forEach(v=>{g+=`<line x1="${X(v)}" x2="${X(v)}" y1="${H-m.b}" y2="${H-m.b+4}" stroke="var(--muted)"/><text x="${X(v)}" y="${H-m.b+17}" text-anchor="middle">${o.xfmt?o.xfmt(v):v}</text>`});
+  g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--muted)"/><line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H-m.b}" stroke="var(--muted)"/>`;
+  g+=`<text x="${(m.l+W-m.r)/2}" y="${H-6}" text-anchor="middle">${o.xlabel}</text>`;
+  g+=`<text transform="translate(13 ${(m.t+H-m.b)/2}) rotate(-90)" text-anchor="middle">${o.ylabel}</text>`;
+  (o.vlines||[]).forEach(v=>{g+=`<line x1="${X(v.x)}" x2="${X(v.x)}" y1="${m.t}" y2="${H-m.b}" stroke="${v.color||'var(--accent)'}" stroke-width="1.5" stroke-dasharray="${v.dash||'4 3'}"/>${v.label?`<text x="${X(v.x)+4}" y="${m.t+10}" style="fill:${v.color||'var(--accent)'}">${v.label}</text>`:''}`});
+  o.series.forEach(s=>{
+    if(s.lo&&s.hi){const up=s.x.map((x,i)=>`${X(x)},${Y(Math.max(s.hi[i],o.log?ymin:-1e9))}`), dn=s.x.map((x,i)=>`${X(x)},${Y(Math.max(s.lo[i],o.log?ymin:-1e9))}`).reverse();
+      g+=`<polygon points="${up.concat(dn).join(' ')}" fill="${s.color}" opacity=".13"/>`;}
+    const pts=s.x.map((x,i)=>isFinite(s.y[i])&&(!o.log||s.y[i]>0)?`${X(x)},${Y(s.y[i])}`:null).filter(Boolean).join(' ');
+    g+=`<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" ${s.dash?`stroke-dasharray="${s.dash}"`:''} stroke-linejoin="round"/>`;
+    if(s.dots)s.x.forEach((x,i)=>{if(isFinite(s.y[i])&&(!o.log||s.y[i]>0))g+=`<circle cx="${X(x)}" cy="${Y(s.y[i])}" r="3" fill="${s.color}"/>`});
+  });
+  if(o.mark!==undefined){const xm=X(o.mark);g+=`<line x1="${xm}" x2="${xm}" y1="${m.t}" y2="${H-m.b}" stroke="var(--fg)" stroke-width="1" opacity=".5"/>`;
+    o.series.forEach(s=>{const i=s.x.indexOf(o.mark);if(i>=0&&isFinite(s.y[i])&&(!o.log||s.y[i]>0))g+=`<circle cx="${xm}" cy="${Y(s.y[i])}" r="5" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`});}
+  host.innerHTML=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${o.aria||o.ylabel+' versus '+o.xlabel}">${g}</svg><div class="tip" aria-live="polite">${o.hint||'Hover or tap the chart to read values.'}</div>`;
+  const svg=host.querySelector('svg'), tip=host.querySelector('.tip'), ref=o.series[0];
+  const move=e=>{const r=svg.getBoundingClientRect(),px=(e.clientX-r.left)/r.width*W;let best=0,bd=1e9;
+    ref.x.forEach((x,i)=>{const d=Math.abs(X(x)-px);if(d<bd){bd=d;best=i}});
+    const x=ref.x[best];
+    tip.innerHTML=`<b>${o.tipx?o.tipx(x):x}</b> &nbsp; `+o.series.map(s=>{const i=s.x.indexOf(x);return i<0?'':`<span style="color:${s.color}">${s.name}</span> ${o.tipfmt?o.tipfmt(s.y[i]):s.y[i]}`}).filter(Boolean).join(' &nbsp;·&nbsp; ');};
+  svg.addEventListener('pointermove',move);svg.addEventListener('pointerdown',move);
+}
+function niceTicks(a,b,n){const span=b-a,raw=span/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p,s=(f<1.5?1:f<3?2:f<7?5:10)*p;
+  const t=[];for(let v=Math.ceil(a/s)*s;v<=b+1e-9;v+=s)t.push(+v.toFixed(10));return t}
+
+/* ---------- panels ---------- */
+const TABS=[
+ ['overview','Scoreboard'],['accuracy','Accuracy vs SNR'],['mse','Aggregation error'],['curves','Training curves'],
+ ['threshold','Truncation threshold'],['csi','Imperfect CSI'],['fade','Why truncation works']];
+
+function ser(metric, o={}){return sel().map(m=>{const d=D.E[m.key];
+  return {name:m.name,color:col(m.id),dash:m.id==='M2-EIG'?'6 3':m.id==='OPT'?'2 3':m.id==='M1-BF'?'':'',x:SNRS,y:d[metric].map(v=>o.scale?v*o.scale:v),dots:true,
+    lo:o.band?d.acc.map((v,i)=>100*(v-d.acc_std[i])):undefined,hi:o.band?d.acc.map((v,i)=>100*(v+d.acc_std[i])):undefined}})}
+
+function pOverview(){
+  const i=st.snr, s=SNRS[i];
+  const cards=sel().map(m=>{const d=D.E[m.key];return `<div class="mc" style="--c:${col(m.id)}">
+    <div class="nm">${m.name}</div><div class="ds">${m.long}</div>
+    <div class="big">${pct(d.acc[i])}<span style="font-size:14px;color:var(--muted)"> %</span></div>
+    <div class="bar"><span style="width:${100*d.acc[i]}%"></span></div>
+    <dl><dt>± seeds</dt><dd>${pct(d.acc_std[i])} pt</dd><dt>Aggregation MSE</dt><dd>${fmtMSE(d.mse[i])}</dd>
+    <dt>Devices sending</dt><dd>${(100*d.part[i]).toFixed(0)} %</dd><dt>Receive SNR</dt><dd>${d.rx[i].toFixed(1)} dB</dd></dl></div>`}).join('');
+  const ideal=D.R.snr.IDEAL_acc;
+  return `<div class="btnrow"><span class="note" style="margin:0">Test accuracy after 100 rounds at <b style="color:var(--fg)">${s} dB</b>. Noiseless reference: <b style="color:var(--fg)">${pct(ideal)} %</b>. Move the SNR slider to compare.</span></div>
+  <div class="cards">${cards||'<p class="note">Turn on at least one method above.</p>'}</div>
+  <div class="finds">
+   <div class="card"><h3>Truncation, not beamforming, does most of the work</h3><p>At −25 dB, M1 reaches ${pct(D.E.M1.acc[2])} %. Dropping the weakest devices (M2) lifts it to ${pct(D.E.M2.acc[2])} %, and the aggregation error falls about 199 times.</p></div>
+   <div class="card"><h3>M3's edge is array gain</h3><p>A fixed combiner with no refinement (M2+EIG) matches M3: ${pct(D.E['M2-EIG'].acc[2])} % against ${pct(D.E.M3.acc[2])} %. The max-min optimisation added nothing measurable.</p></div>
+   <div class="card"><h3>Low error is not the same as high accuracy</h3><p>OPT has the lowest error (${fmtMSE(D.E.OPT.mse[2])}) but only ${pct(D.E.OPT.acc[2])} % accuracy at −25 dB, so MSE is only a proxy for learning.</p></div>
+  </div>`;
+}
+function pAccuracy(){return `<div class="two"><div class="card"><h3>Test accuracy against nominal SNR</h3><p class="note">Lines show the mean of ten seeds, shaded bands show ± one standard deviation. The vertical marker follows the slider.</p><div id="ch1"></div></div>
+  <div class="card"><h3>Values at ${SNRS[st.snr]} dB</h3>${tbl()}<p class="note">M1 matches the noiseless accuracy only from about 0 dB. M2 and M3 are within one point of it at −25 dB.</p></div></div>`}
+function tbl(){return `<div class="tblwrap"><table><tr><th>Method</th><th>Acc. %</th><th>MSE</th><th>Rx SNR</th></tr>${sel().map(m=>{const d=D.E[m.key],i=st.snr;
+  return `<tr><td><span class="sw" style="--c:${col(m.id)}"></span>${m.name}</td><td class="num">${pct(d.acc[i])} ± ${pct(d.acc_std[i])}</td><td class="num">${fmtMSE(d.mse[i])}</td><td class="num">${d.rx[i].toFixed(1)}</td></tr>`}).join('')}</table></div>`}
+function pMse(){return `<div class="two"><div class="card"><h3>Aggregation MSE against nominal SNR <span class="badge">log scale</span></h3><p class="note">Squared distance between the received gradient and the true average gradient.</p><div id="ch1"></div></div>
+  <div class="card"><h3>Realised receive SNR</h3><p class="note">The SNR the server actually sees is lower than the nominal one, because every device scales down to match the weakest participant.</p><div id="ch2"></div></div></div>`}
+function pCurves(){const have=['M1','M2','M3','M1-BF'];return `<div class="two"><div class="card"><h3>Test accuracy during training <span class="badge">fixed at −25 dB</span></h3>
+  <div class="btnrow"><button class="btn pri" id="play" type="button">${st.playing?'Pause':'Play training'}</button><button class="btn" id="reset" type="button">Restart</button>
+  <label class="note" style="margin:0">Round <output id="rOut" style="font-family:var(--f-mono);color:var(--fg)">${st.round}</output></label></div>
+  <input id="round" type="range" min="1" max="100" value="${st.round}" aria-label="Training round"><div id="ch1"></div></div>
+  <div class="card"><h3>Accuracy at round <span id="rr">${st.round}</span></h3><div id="curveTbl"></div><p class="note">M2+EIG and OPT were run for final accuracy only, so they have no curve. Ideal is the noiseless average gradient.</p></div></div>`}
+function pThreshold(){const r=D.E.rule[st.K], g=r.grid, i=st.hi;
+  return `<div class="two"><div class="card"><h3>M2 error against truncation threshold <span class="badge">−25 dB · perfect CSI</span></h3>
+   <div class="btnrow"><span class="note" style="margin:0">Number of devices K</span>${['20','50','100'].map(k=>`<button class="btn" data-k="${k}" aria-pressed="${k===st.K}" type="button">${k}</button>`).join('')}</div>
+   <div id="ch1"></div></div>
+   <div class="card"><h3>Pick a threshold</h3><div class="ctl"><label for="thr"><span>Threshold h<sub>th</sub></span> <output id="thOut"></output></label><input id="thr" type="range" min="0" max="${g.length-1}" value="${i}"></div>
+   <div class="stat" id="thStat"></div>
+   <p class="note" style="margin-top:12px">The design rule from Section 3.5 picks h<sub>th</sub> = <b style="color:var(--fg)">${r.theory.toFixed(2)}</b> using only K. The grid search found the lowest error at <b style="color:var(--fg)">${r.emp_mse_opt}</b>. At 0.7 the error is within about 3 % of that minimum for all three K.</p></div></div>`}
+function pCsi(){return `<div class="two"><div class="card"><h3>Accuracy against channel-estimate error <span class="badge">fixed at −25 dB</span></h3><p class="note">ε is the variance of the estimation error. Beamforming without truncation (M1+BF) is the least robust.</p><div id="ch1"></div></div>
+  <div class="card"><h3>Aggregation MSE against ε <span class="badge">log scale</span></h3><div id="ch2"></div></div></div>`}
+function pFade(){const c=st.ch;return `<div class="two"><div class="card"><h3>One round of fading, K devices <span class="badge">illustration</span></h3>
+  <p class="note">Each bar is a device's channel gain |h|², drawn from a Rayleigh channel (an exponential distribution). The dashed line is the threshold h<sub>th</sub>². Grey bars are silenced.</p>
+  <div class="btnrow"><button class="btn pri" id="redraw" type="button">Draw a new channel</button><span class="note" style="margin:0">Devices K</span>${[20,50,100].map(k=>`<button class="btn" data-ck="${k}" aria-pressed="${k===c.K}" type="button">${k}</button>`).join('')}</div>
+  <div class="ctl"><label for="cth"><span>Threshold h<sub>th</sub></span> <output id="cthOut"></output></label><input id="cth" type="range" min="0" max="1.5" step="0.05" value="${c.th}"></div>
+  <div id="ch1"></div></div>
+  <div class="card"><h3>What this does to the alignment</h3><div class="stat" id="fStat"></div>
+  <p class="note" style="margin-top:12px">With full inversion, the weakest channel sets the common amplitude (Eq. 5), so one deep fade forces everyone to transmit weakly and the receiver noise is amplified. Truncating removes that device. The noise error scales as 1/(n² · smallest gain) (Eq. 7). This view uses the equations, not training runs, so numbers change with each draw.</p></div></div>`}
+
+/* ---------- render ---------- */
+const PANELS={overview:pOverview,accuracy:pAccuracy,mse:pMse,curves:pCurves,threshold:pThreshold,csi:pCsi,fade:pFade};
+function render(){
+  $('#snrOut').textContent=SNRS[st.snr]+' dB';
+  $('#tabs').innerHTML=TABS.map(([id,l])=>`<button role="tab" data-t="${id}" aria-selected="${id===st.tab}">${l}</button>`).join('');
+  $('#panel').innerHTML=PANELS[st.tab]();
+  $('#panel').setAttribute('role','tabpanel');
+  draw();
+}
+function draw(){
+  const mk=s=>document.querySelector(s);
+  if(st.tab==='accuracy'){lineChart(mk('#ch1'),{series:ser('acc',{scale:100,band:true}),xlabel:'Nominal SNR (dB)',ylabel:'Test accuracy (%)',xticks:SNRS.filter((_,i)=>i%1===0&&i<7).concat([10,20,30]),
+    ymin:20,ymax:100,mark:SNRS[st.snr],tipx:x=>x+' dB',tipfmt:v=>v.toFixed(1)+'%'});
+    const ideal=D.R.snr.IDEAL_acc*100;}
+  if(st.tab==='mse'){lineChart(mk('#ch1'),{series:ser('mse'),xlabel:'Nominal SNR (dB)',ylabel:'Aggregation MSE',log:true,mark:SNRS[st.snr],xticks:[-30,-20,-10,0,10,20,30],tipx:x=>x+' dB',tipfmt:fmtMSE,yfmt:v=>'1e'+Math.round(Math.log10(v))});
+    lineChart(mk('#ch2'),{series:ser('rx'),xlabel:'Nominal SNR (dB)',ylabel:'Receive SNR (dB)',mark:SNRS[st.snr],xticks:[-30,-20,-10,0,10,20,30],tipx:x=>x+' dB nominal',tipfmt:v=>v.toFixed(1)+' dB'});}
+  if(st.tab==='curves')drawCurves();
+  if(st.tab==='threshold')drawThr();
+  if(st.tab==='csi'){const eps=D.R.csi.eps;
+    const L=sel().map(m=>{const d=D.R.csi[m.key]||D.E.csi[m.key];return d?{name:m.name,color:col(m.id),dash:m.id==='M2-EIG'?'6 3':m.id==='OPT'?'2 3':'',x:eps,y:d.acc.map(v=>v*100),y2:d.mse,dots:true}:null}).filter(Boolean);
+    lineChart(mk('#ch1'),{series:L,xlabel:'CSI error variance ε',ylabel:'Test accuracy (%)',xticks:eps,ymin:55,ymax:100,tipx:x=>'ε = '+x,tipfmt:v=>v.toFixed(1)+'%'});
+    lineChart(mk('#ch2'),{series:L.map(s=>({...s,y:s.y2})),xlabel:'CSI error variance ε',ylabel:'Aggregation MSE',log:true,xticks:eps,tipx:x=>'ε = '+x,tipfmt:fmtMSE,yfmt:v=>'1e'+Math.round(Math.log10(v))});}
+  if(st.tab==='fade')drawFade();
+}
+function curveSeries(r){const ids=['IDEAL','M1','M2','M3','M1-BF'];
+  return ids.filter(id=>id==='IDEAL'||on[id]).map(id=>{const y=D.R.curve[id].map(v=>v*100);
+    return {name:id==='IDEAL'?'Ideal':METHODS.find(m=>m.id===id).name,color:id==='IDEAL'?'var(--c-IDEAL)':col(id),dash:id==='IDEAL'?'5 4':'',x:y.slice(0,r).map((_,i)=>i+1),y:y.slice(0,r)}})}
+function drawCurves(){const r=st.round;
+  lineChart($('#ch1'),{series:curveSeries(r),xlabel:'Communication round',ylabel:'Test accuracy (%)',xmin:1,xmax:100,ymin:0,ymax:100,xticks:[1,20,40,60,80,100],tipx:x=>'round '+x,tipfmt:v=>v.toFixed(1)+'%',hint:'Press Play to watch the models train round by round.'});
+  $('#rOut').textContent=r;$('#rr').textContent=r;
+  $('#curveTbl').innerHTML=`<div class="tblwrap"><table><tr><th>Method</th><th>Acc. %</th></tr>${['IDEAL','M1','M2','M3','M1-BF'].filter(id=>id==='IDEAL'||on[id]).map(id=>`<tr><td><span class="sw" style="--c:${id==='IDEAL'?'var(--c-IDEAL)':col(id)}"></span>${id==='IDEAL'?'Ideal':METHODS.find(m=>m.id===id).name}</td><td class="num">${(D.R.curve[id][r-1]*100).toFixed(1)}</td></tr>`).join('')}</table></div>`;
+  $('#round').value=r;}
+let timer=null;
+function play(){if(timer)return;st.playing=true;if(st.round>=100)st.round=1;const b=$('#play');if(b)b.textContent='Pause';
+  timer=setInterval(()=>{if(st.tab!=='curves'){stop();return}st.round++;drawCurves();if(st.round>=100)stop()},90)}
+function stop(){clearInterval(timer);timer=null;st.playing=false;const b=$('#play');if(b)b.textContent='Play training'}
+function drawThr(){const r=D.E.rule[st.K],g=r.grid,i=st.hi;
+  const x=g,series=[{name:'MSE',color:'var(--accent)',x,y:r.mse,dots:true}];
+  lineChart($('#ch1'),{series,xlabel:'Truncation threshold h_th',ylabel:'Aggregation MSE',log:true,xticks:[0,0.3,0.6,0.9,1.2,1.5],mark:g[i],
+    vlines:[{x:r.theory,label:'rule '+r.theory.toFixed(2),color:'var(--good)',dash:'5 3'}],tipx:v=>'h_th = '+v,tipfmt:fmtMSE,yfmt:v=>'1e'+Math.round(Math.log10(v))});
+  $('#thOut').textContent=g[i].toFixed(1);
+  $('#thStat').innerHTML=`<div><span>MSE</span><b>${fmtMSE(r.mse[i])}</b></div><div><span>Accuracy</span><b>${pct(r.acc[i]/1)} %</b></div><div><span>Devices sending</span><b>${(100*r.part[i]).toFixed(0)} %</b></div><div><span>Expected e^(−h²)</span><b>${(100*Math.exp(-g[i]*g[i])).toFixed(0)} %</b></div>`;}
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function drawFade(){const c=st.ch,r=rng(c.seed*7919+c.K),h=[];for(let i=0;i<c.K;i++)h.push(-Math.log(1-r()));
+  h.sort((a,b)=>a-b);const t2=c.th*c.th,part=h.filter(v=>v>=t2),n=part.length,minAll=h[0],minP=part[0]??NaN;
+  const W=640,H=300,m={l:46,r:12,t:12,b:30},cap=6,bw=(W-m.l-m.r)/c.K,Y=v=>H-m.b-Math.min(v,cap)/cap*(H-m.t-m.b);
+  let g='';[0,1,2,3,4,5,6].forEach(v=>g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end">${v}${v===6?'+':''}</text>`);
+  h.forEach((v,i)=>{const ok=v>=t2;g+=`<rect x="${m.l+i*bw+0.5}" y="${Y(v)}" width="${Math.max(bw-1.5,1)}" height="${H-m.b-Y(v)}" fill="${ok?'var(--c-M2)':'var(--c-IDEAL)'}" opacity="${ok?1:.55}" rx="1"/>`});
+  g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(t2)}" y2="${Y(t2)}" stroke="var(--bad)" stroke-width="1.5" stroke-dasharray="5 3"/><text x="${W-m.r-4}" y="${Y(t2)-5}" text-anchor="end" style="fill:var(--bad)">threshold h²=${t2.toFixed(2)}</text>`;
+  g+=`<text x="${(m.l+W-m.r)/2}" y="${H-6}" text-anchor="middle">devices sorted by channel gain</text><text transform="translate(12 ${H/2}) rotate(-90)" text-anchor="middle">|h|²</text>`;
+  $('#ch1').innerHTML=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Channel gains of ${c.K} devices with the truncation threshold">${g}</svg>`;
+  $('#cthOut').textContent=c.th.toFixed(2);
+  const etaGain=n? minP/minAll:NaN, noiseRatio=n?(n*n*minP)/(c.K*c.K*minAll):NaN;
+  $('#fStat').innerHTML=`<div><span>Devices sending</span><b>${n} of ${c.K}</b></div><div><span>Expected e^(−h²)</span><b>${(100*Math.exp(-t2)).toFixed(0)} %</b></div><div><span>Weakest gain, all</span><b>${minAll.toFixed(4)}</b></div><div><span>Weakest gain, sending</span><b>${n?minP.toFixed(3):'none'}</b></div><div><span>Alignment factor η</span><b>${n?'×'+(etaGain>=100?etaGain.toFixed(0):etaGain.toFixed(1)):'—'}</b></div><div><span>Noise error</span><b>${n?(noiseRatio>=100?'÷'+noiseRatio.toFixed(0):'÷'+noiseRatio.toFixed(1)):'—'}</b></div>`;}
+
+/* ---------- events ---------- */
+$('#chips').innerHTML=METHODS.map(m=>`<button class="chip" data-m="${m.id}" style="--c:${col(m.id)}" aria-pressed="${on[m.id]}" title="${m.long}" type="button"><i></i>${m.name}</button>`).join('');
+$('#chips').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;on[b.dataset.m]=!on[b.dataset.m];b.setAttribute('aria-pressed',on[b.dataset.m]);render()});
+$('#snr').addEventListener('input',e=>{st.snr=+e.target.value;render()});
+$('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(st.tab==='curves'&&b.dataset.t!=='curves')stop();st.tab=b.dataset.t;render()});
+$('#panel').addEventListener('click',e=>{
+  const t=e.target.closest('button');if(!t)return;
+  if(t.id==='play'){st.playing?stop():play();return}
+  if(t.id==='reset'){stop();st.round=1;drawCurves();return}
+  if(t.dataset.k){st.K=t.dataset.k;render();return}
+  if(t.dataset.ck){st.ch.K=+t.dataset.ck;render();return}
+  if(t.id==='redraw'){st.ch.seed=Math.floor(Math.random()*1e6);drawFade()}
+});
+$('#panel').addEventListener('input',e=>{
+  if(e.target.id==='round'){stop();st.round=+e.target.value;drawCurves()}
+  if(e.target.id==='thr'){st.hi=+e.target.value;drawThr()}
+  if(e.target.id==='cth'){st.ch.th=+e.target.value;drawFade()}
+});
+$('#themeBtn').addEventListener('click',()=>{const r=document.documentElement,d=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;r.dataset.theme=d?'light':'dark';});
+render();
+</script>
+</body></html>
