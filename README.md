@@ -28,7 +28,16 @@ sklearn digits (1,347 train / 450 test), softmax regression (d = 650), Dirichlet
 100 rounds per run, 10 seeds, reference SNR -25 dB. Channel-trace indices 0-99 for tuning, 400-499 for reporting.
 
 ## MNIST files (not included, public data set)
-`mnist_cnn_sim.py` expects the four gzip files in the same folder:
+`mnist_cnn_sim.py` expects these four files in the same folder as the scripts. Click each link to download it, and do not unzip them:
+
+- [train-images-idx3-ubyte.gz](https://raw.githubusercontent.com/golbin/TensorFlow-MNIST/master/mnist/data/train-images-idx3-ubyte.gz)
+- [train-labels-idx1-ubyte.gz](https://raw.githubusercontent.com/golbin/TensorFlow-MNIST/master/mnist/data/train-labels-idx1-ubyte.gz)
+- [t10k-images-idx3-ubyte.gz](https://raw.githubusercontent.com/golbin/TensorFlow-MNIST/master/mnist/data/t10k-images-idx3-ubyte.gz)
+- [t10k-labels-idx1-ubyte.gz](https://raw.githubusercontent.com/golbin/TensorFlow-MNIST/master/mnist/data/t10k-labels-idx1-ubyte.gz)
+
+Or download all four from a terminal:
+
     for f in train-images-idx3-ubyte train-labels-idx1-ubyte t10k-images-idx3-ubyte t10k-labels-idx1-ubyte; do
       curl -O https://raw.githubusercontent.com/golbin/TensorFlow-MNIST/master/mnist/data/$f.gz; done
+
 Run single-threaded for speed: `OMP_NUM_THREADS=1 python mnist_full.py` (about 30 minutes on 2 cores for `mnist_full.py`; `mnist_batch.py` takes about 1.5 hours on 2 cores).
