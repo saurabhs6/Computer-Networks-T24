@@ -34,6 +34,8 @@ from sklearn.datasets import load_digits
 K = 50                 # devices (same as P1)
 ROUNDS = 100           # training rounds per run (= P1 held-out channel block)
 LR = 1.0               # server learning rate
+C22_KAPPA = 1.0
+NORM = False          # True: unit-power normalised symbols (review item 3)
 RHO = 0.1              # gradient normalisation constant (pre-processing)
 P_MAX = 1.0            # per-element power budget of the normalised symbol
 N_RX = 4               # receive antennas for M3
@@ -140,7 +142,12 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng):
     c, c_hat : (K,) true / estimated effective scalar channels
     Returns g_hat, info
     """
-    S = G / RHO
+    if NORM:   # unit-power symbols: each device scales by its own rho_k, side information reaches the server error-free
+        rho_k = np.sqrt(np.sum(G ** 2, 1) / D) + 1e-12
+        S = G / rho_k[:, None]
+    else:
+        rho_k = np.full(K, RHO)
+        S = G / RHO
     sigma2 = P_MAX / (10 ** (snr_db / 10))
     gain = np.abs(c_hat)
     pw = np.sum(S ** 2, 1) / D                    # per-element symbol power
@@ -152,7 +159,28 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng):
     if n_part == 0:
         return np.zeros(D), dict(part=0.0, power=0.0, noise_var=0.0, rx_snr_db=float("nan"))
     b = np.zeros(K, complex)
-    if method == "OPT":
+    if method == "C22":
+        # Case I policy of Cao et al. [12] with the maximum-power constraint (dual variables = 0):
+        # every device transmits, received amplitude m_k = min(c, a_k), a_k = |c_hat_k| sqrt(P_MAX/pi_k);
+        # c minimises  kappa*(sum_k m_k - K*tau)^2 + sum_k (m_k - tau)^2  (first-order condition solved by bisection).
+        # tau is the fixed (noise-agnostic) design target; the server scales by 1/(K*tau).
+        tau, kap = thr, C22_KAPPA / K
+        a_k = gain * np.sqrt(P_MAX / pw)
+        lo, hi = 0.0, tau * (1 + kap * K) + 1e-12
+        for _ in range(60):
+            c0 = 0.5 * (lo + hi)
+            f = c0 - tau + kap * (np.minimum(c0, a_k).sum() - K * tau)
+            lo, hi = (c0, hi) if f < 0 else (lo, c0)
+        m = np.minimum(0.5 * (lo + hi), a_k)
+        b = m * np.conj(c_hat) / gain ** 2
+        sqrt_eta = tau
+    elif method == "RCI":
+        # regularised channel inversion (the form reported in [12]); thr is used as the regulariser lambda.
+        lam = thr
+        amp = np.sqrt(P_MAX / pw) * (gain ** 2 + lam) / gain
+        sqrt_eta = amp.min()
+        b = sqrt_eta * np.conj(c_hat) / (gain ** 2 + lam)
+    elif method == "OPT":
         # MSE-optimised policy with the threshold structure of Cao et al. [7]:
         # devices that cannot reach the common amplitude sqrt(eta) transmit at full power,
         # the others invert their channel.  eta is chosen by grid search on the
@@ -167,9 +195,10 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng):
         sqrt_eta = np.min(np.sqrt(P_MAX / pw[part]) * gain[part])
         b[part] = sqrt_eta * np.conj(c_hat[part]) / gain[part] ** 2
     y = (c[part] * b[part]) @ S[part] + cn(rng, D, sigma2)   # superposition
-    g_hat = RHO * np.real(y) / (n_part * sqrt_eta)
+    rho_bar = float(np.mean(rho_k[part]))
+    g_hat = rho_bar * np.real(y) / (n_part * sqrt_eta)
     tx_power = float(np.mean(np.abs(b[part]) ** 2 * pw[part]))
-    noise_var = RHO ** 2 * D * sigma2 / 2.0 / (n_part * sqrt_eta) ** 2
+    noise_var = rho_bar ** 2 * D * sigma2 / 2.0 / (n_part * sqrt_eta) ** 2
     rx = float(np.mean(np.abs(c[part] * b[part]) ** 2 * pw[part]) / sigma2)   # realised receive SNR per device
     return g_hat, dict(part=n_part / K, power=tx_power / P_MAX, noise_var=noise_var,
                        rx_snr_db=10 * np.log10(rx))
