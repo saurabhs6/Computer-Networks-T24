@@ -1,4 +1,4 @@
-"""Figure 1: OTA-FL signal chain shared by M1, M2, M3 (block diagram)."""
+"""Figure 1: OTA-FL signal chain shared by all policies (block diagram), unit-power symbols."""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -23,10 +23,10 @@ def arrow(x1, y1, x2, y2, text=None, dy=0.22, ls="-"):
 
 
 # top row: devices -> precoding -> channel -> receiver -> model update
-box(0.2, 3.3, 2.3, 2.4, "K devices\nlocal gradient $g_k$\n$s_k=g_k/\\rho$")
-box(3.2, 3.3, 2.5, 2.4, "Power control\n$b_k=\\sqrt{\\eta}\\,\\hat c_k^{*}/|\\hat c_k|^2$\n(M1: all devices\nM2, M3: $|\\hat c_k|\\geq h_{th}$)")
-box(6.4, 3.3, 2.5, 2.4, "Fading MAC\n$y=\\sum_k c_k b_k s_k+n$\nRayleigh $h_k\\sim CN(0,1)$\nnoise $n\\sim CN(0,\\sigma^2)$")
-box(9.6, 3.3, 3.0, 2.4, "Server\n(M3: combiner $a$, $c_k=a^{H}h_k$)\n$\\hat g=\\rho\\,\\mathrm{Re}\\{y\\}/(|S|\\sqrt{\\eta})$")
+box(0.2, 3.3, 2.3, 2.4, "K devices\nlocal gradient $g_k$\n$s_k=g_k/\\rho_k$\n$\\rho_k=\\|g_k\\|/\\sqrt{d}$")
+box(3.2, 3.3, 2.5, 2.4, "Power control\n$b_k=\\sqrt{\\eta}\\,\\hat c_k^{*}/|\\hat c_k|^2$\n(M1: all devices\nM2, M3: $|\\hat c_k|\\geq h_{th}$;\nbaselines: Sec. 3.4)")
+box(6.4, 3.3, 2.5, 2.4, "Fading MAC\n$y=\\Sigma_k\\, c_k b_k s_k+n$\nRayleigh $h_k\\sim CN(0,1)$\nnoise $n\\sim CN(0,\\sigma^2)$")
+box(9.6, 3.3, 3.0, 2.4, "Server\n(M3: combiner $a$, $c_k=a^{H}h_k$)\n$\\hat g=\\bar\\rho\\,\\mathrm{Re}\\{y\\}/(|S|\\sqrt{\\eta})$")
 arrow(2.5, 4.5, 3.2, 4.5); arrow(5.7, 4.5, 6.4, 4.5); arrow(8.9, 4.5, 9.6, 4.5)
 
 # bottom: model update and broadcast
