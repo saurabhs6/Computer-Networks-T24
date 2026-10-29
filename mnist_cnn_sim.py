@@ -71,12 +71,9 @@ def run(method, snr_db, seed, thr, data, rho, eps=0.0, ideal=False, eval_every=1
     parts = S.partition(ytr, K_DEV, 0.5, rng)
     w = init(np.random.default_rng(10 + seed))
     block = S.TEST_SLICE
-    if method in ("M3", "M1-BF", "M2-EIG"):
-        Hall = S.cn(np.random.default_rng(S.P1_SEED + seed + 77), (500, K_DEV, S.N_RX), 1.0)[block]
-    else:
-        Hall = S.p1_channels(seed)[block]
+    Hall = S.channel_trace(method, seed)[block]          # same traces as before for i.i.d. fading
     est_rng = np.random.default_rng(3000 + seed); noise_rng = np.random.default_rng(4000 + seed); brng = np.random.default_rng(5000 + seed)
-    acc, mse, part, rx = [], [], [], []
+    acc, mse, part, rx, proj = [], [], [], [], []
     for t in range(ROUNDS):
         G = np.stack([grad(w, Xtr[idx], ytr[idx]) for idx in (brng.choice(p, min(BATCH, len(p)), replace=False) for p in parts)])
         g_bar = G.mean(0)
@@ -90,11 +87,14 @@ def run(method, snr_db, seed, thr, data, rho, eps=0.0, ideal=False, eval_every=1
                 Hh = S.mmse_estimate(H, eps, est_rng)
                 a = S.beamformer(Hh, thr, iters=(0 if method == "M2-EIG" else 40))
                 c, c_hat = H @ a.conj(), Hh @ a.conj()
-            g_hat, info = S.ota_round(G, c, c_hat, method, thr, snr_db, noise_rng)
+            g_hat, info = S.ota_round(G, c, c_hat, method, thr, snr_db, noise_rng, eps=eps)
         err = g_hat - g_bar; mse.append(float(err @ err)); part.append(info["part"]); rx.append(info.get("rx_snr_db", np.nan))
+        proj.append(float(g_hat @ g_bar) / float(g_bar @ g_bar))
         w = w - LR_C * g_hat
         if (t + 1) % eval_every == 0: acc.append(accuracy(w, Xte, yte))
-    return dict(acc=acc, mse=float(np.mean(mse)), part=float(np.mean(part)), rx=float(np.nanmean(rx)) if not ideal else float("nan"))
+    m = np.array(mse)
+    return dict(acc=acc, mse=float(m.mean()), mse_med=float(np.median(m)), mse_p90=float(np.percentile(m, 90)),
+                part=float(np.mean(part)), rx=float(np.nanmean(rx)) if not ideal else float("nan"), proj=float(np.mean(proj)))
 
 
 def calibrate_rho(data, target=0.75):

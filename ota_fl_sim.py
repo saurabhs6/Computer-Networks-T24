@@ -25,8 +25,26 @@ M3 : N_RX receive antennas; the receive combiner a is optimised jointly with
      the truncation rule (max-min effective gain), then truncated inversion.
 M1-BF (ablation) : beamforming only, no truncation.
 IDEAL : noiseless, fading-free aggregation (upper reference).
+
+Baselines added for the second-level corrections (all re-implementations, see the manuscript):
+M2-EIG : M2 with a fixed eigenvector combiner (no max-min refinement).
+OPT    : threshold structure of the MSE-optimised policy of Cao et al. [7].
+RCI    : regularised channel inversion with a tuned regulariser.
+C22    : Case I power control of Cao et al. [12] ("C12" in the manuscript).
+Z10    : closed-form gradient-statistics-aware power control of Zhang & Tao [10] (Theorem 1).
+Y14    : statistics-based regularised policy with the closed-form structure of Yu et al. [14].
+Y4     : device selection + receive beamforming of Yang et al. [4] (SDR ordering + DC rank-one
+         feasibility detection), followed by channel inversion on the selected set.
+
+Version 3 switches (defaults reproduce the earlier results exactly):
+NORM      True -> unit-power symbols (each device divides by rho_k = ||g_k||/sqrt(d)).
+JAKES_FD  normalised Doppler f_D*T of a first-order Gauss-Markov channel with Jakes
+          correlation J0(2*pi*f_D*T); 0 keeps i.i.d. block fading.
+N_RX      receive antennas of the multi-antenna methods.
+DIRICHLET_ALPHA  label skew of the device partition.
 """
 import json
+from functools import lru_cache
 import numpy as np
 from sklearn.datasets import load_digits
 
@@ -45,6 +63,9 @@ SEEDS = list(range(10))
 SNR_REF = -25          # reference operating SNR (dB): noise-limited regime where methods differ
 P1_SEED = 42           # seed of the shared P1 channel trace
 DIRICHLET_ALPHA = 0.5  # label skew across devices
+JAKES_FD = 0.0         # 0: i.i.d. block fading; >0: Gauss-Markov fading with Jakes correlation
+DEBIAS = False         # True: the server divides by the sum of the (estimated) received amplitudes instead of K*sqrt(eta)
+Y4_SOLVER = "CLARABEL"
 
 # ---------------------------------------------------------------------- data
 def load_data(seed):
@@ -109,6 +130,223 @@ def p1_channels(seed):
     return real + 1j * imag
 
 
+def jakes_r(fd):
+    """One-step correlation J0(2*pi*fd) of Clarke/Jakes fading."""
+    from scipy.special import j0
+    return float(j0(2 * np.pi * fd))
+
+
+def gm_trace(rng, tail, fd, n=500):
+    """First-order Gauss-Markov fading h[t] = r h[t-1] + sqrt(1-r^2) w[t] with r = J0(2 pi f_D T).
+    Every h[t] is CN(0, 1); consecutive rounds are correlated."""
+    r = jakes_r(fd)
+    h = np.empty((n,) + tuple(tail), complex)
+    h[0] = cn(rng, tail)
+    for t in range(1, n):
+        h[t] = r * h[t - 1] + np.sqrt(1 - r * r) * cn(rng, tail)
+    return h
+
+
+def channel_trace(method, seed):
+    """Channel trace of one run: (500, K) for single-antenna methods, (500, K, N_RX) otherwise."""
+    multi = method in ("M3", "M1-BF", "M2-EIG", "Y4")
+    if JAKES_FD > 0:
+        rng = np.random.default_rng(P1_SEED + seed + (177 if multi else 100))
+        return gm_trace(rng, (K, N_RX) if multi else (K,), JAKES_FD)
+    if multi:
+        return cn(np.random.default_rng(P1_SEED + seed + 77), (500, K, N_RX), 1.0)
+    return p1_channels(seed)
+
+
+# ------------------------------------------------- [4]: device selection + beamforming
+def y4_select(Hh, gamma, dc_iters=40, tol=1e-6):
+    """Device selection and receive beamforming of Yang et al. [4] for the MSE requirement gamma
+    (feasible device: ||m||^2 - gamma |m^H h_i|^2 <= 0, i.e. |a^H h_i|^2 >= 1/gamma for unit-norm a).
+    Step 1 (sparsity inducing, PS1 of [4]):  min ||x||_1 - |||x|||_k + Tr(M) - ||M||_2
+        s.t. Tr(M) - gamma h_i^H M h_i <= x_i, M >= 0, Tr(M) >= 1, x >= 0,
+        solved by the DC algorithm (linearising the Ky Fan k-norm and the spectral norm); the smallest k
+        with zero objective is found by bisection over k (the zero-objective condition is monotone in k).
+    Step 2 (feasibility detection, PS2 of [4]): devices ordered by x in descending order; the largest
+        nested set {pi(k),...,pi(M)} for which min Tr(M) - ||M||_2 reaches zero is found by bisection.
+    Returns (mask of selected devices, unit-norm combiner a)."""
+    import cvxpy as cp
+    Kd, N = Hh.shape
+    Q = np.stack([np.outer(h, h.conj()).T.flatten(order="F") for h in Hh])   # Re(Q_i . vec(M)) = h_i^H M h_i
+    M = cp.Variable((N, N), hermitian=True)
+    q = cp.real(Q @ cp.vec(M, order="F"))
+    tr = cp.real(cp.trace(M))
+    x = cp.Variable(Kd, nonneg=True)
+    U = cp.Parameter((N, N), hermitian=True)
+    wx = cp.Parameter(Kd, nonneg=True)
+    p1 = cp.Problem(cp.Minimize(wx @ x + tr - cp.real(cp.trace(U @ M))),
+                    [M >> 0, tr >= 1, tr - gamma * q <= x])
+    msk = cp.Parameter(Kd, nonneg=True)
+    p2 = cp.Problem(cp.Minimize(tr - cp.real(cp.trace(U @ M))),
+                    [M >> 0, tr >= 1, cp.multiply(msk, tr - gamma * q) <= 0])
+
+    def solve(p):
+        try:
+            p.solve(solver=Y4_SOLVER)
+        except Exception:
+            return False
+        return p.status in ("optimal", "optimal_inaccurate") and M.value is not None
+
+    def top(Mv):
+        Mv = (Mv + Mv.conj().T) / 2
+        w, V = np.linalg.eigh(Mv)
+        return Mv, w, V[:, -1]
+
+    def ps1(k):
+        """DC algorithm for PS1 with Ky Fan k-norm; returns (zero objective?, x, a)."""
+        U.value = np.zeros((N, N), complex); wx.value = np.ones(Kd)
+        if not solve(p1):
+            return False, None, None
+        hist = []
+        for _ in range(dc_iters):
+            Mv, w, u = top(M.value); xv = np.maximum(x.value, 0)
+            srt = np.sort(xv)[::-1]
+            obj = srt[k:].sum() + (np.trace(Mv).real - w[-1])
+            if obj < tol * max(1.0, np.trace(Mv).real):
+                return True, xv, u
+            hist.append(obj)
+            if len(hist) > 5 and hist[-6] - obj < 1e-6 * hist[-6]:
+                break
+            ind = np.zeros(Kd)
+            if k > 0:
+                ind[np.argsort(-xv, kind="stable")[:k]] = 1.0
+            wx.value = 1.0 - ind
+            U.value = np.outer(u, u.conj())
+            if not solve(p1):
+                return False, None, None
+        return False, np.maximum(x.value, 0), top(M.value)[2]
+
+    def ps2(sel):
+        """DC algorithm for PS2 on the set sel; returns a unit-norm combiner if a rank-one feasible M is found."""
+        msk.value = sel.astype(float); U.value = np.zeros((N, N), complex)
+        if not solve(p2):
+            return None
+        hist = []
+        for _ in range(dc_iters):
+            Mv, w, u = top(M.value)
+            gap = (np.trace(Mv).real - w[-1]) / max(np.trace(Mv).real, 1e-12)
+            if gap < tol:
+                ok = np.all(gamma * np.abs(Hh[sel] @ u.conj()) ** 2 >= 1 - 1e-5)
+                return u if ok else None
+            hist.append(gap)
+            if len(hist) > 5 and hist[-6] - gap < 1e-6 * hist[-6]:
+                return None
+            U.value = np.outer(u, u.conj())
+            if not solve(p2):
+                return None
+        return None
+
+    # Step 1: smallest k with zero PS1 objective (bisection), keep its x as the priority guideline
+    lo, hi, xs = 0, Kd, None
+    while lo < hi:
+        k = (lo + hi) // 2
+        ok, xv, _ = ps1(k)
+        if ok:
+            hi, xs = k, xv
+        else:
+            lo = k + 1
+    if xs is None:
+        ok, xs, _ = ps1(Kd)
+        if xs is None:
+            xs = np.zeros(Kd)
+    order = np.argsort(-xs, kind="stable")
+    # Step 2: largest nested set {pi(k), ..., pi(M)} certified feasible (bisection over k)
+    lo, hi, best = 0, Kd - 1, None
+    while lo <= hi:
+        k = (lo + hi) // 2
+        sel = np.zeros(Kd, bool); sel[order[k:]] = True
+        a = ps2(sel)
+        if a is not None:
+            best = (sel, a); hi = k - 1
+        else:
+            lo = k + 1
+    if best is None:
+        return np.zeros(Kd, bool), Hh[0].conj() / np.linalg.norm(Hh[0])
+    sel, a = best
+    return sel, a / np.linalg.norm(a)
+
+
+Y4_DIR = "y4cache"
+
+
+def y4_tag(seed, thr, eps, block):
+    return f"s{seed}_t{thr}_e{eps}_b{block.start}_n{N_RX}_k{K}_j{JAKES_FD}"
+
+
+def y4_trace(seed, thr, eps=0.0, block=TEST_SLICE):
+    """Selections of [4] for every round of one run.  They depend only on the channel estimates, not on the
+    noise level or the model, so they are computed once and stored in y4cache/ (re-used at every SNR)."""
+    import os, pickle, warnings
+    path = os.path.join(Y4_DIR, y4_tag(seed, thr, eps, block) + ".pkl")
+    if os.path.exists(path):
+        return pickle.load(open(path, "rb"))
+    warnings.filterwarnings("ignore")
+    Hall = channel_trace("Y4", seed)[block]
+    est_rng = np.random.default_rng(3000 + seed)
+    out = []
+    for t in range(len(Hall)):
+        Hh = mmse_estimate(Hall[t], eps, est_rng)
+        out.append(y4_select(Hh, 1.0 / thr ** 2))
+    os.makedirs(Y4_DIR, exist_ok=True)
+    pickle.dump(out, open(path, "wb"))
+    return out
+
+
+# ------------------------------------------------- [14]: statistics-based regularised policy
+@lru_cache(maxsize=None)
+def y14_design(sigma2, var_h, Kdev, p_avg):
+    """Constants of the policy |b(g)| = c g / (g^2 + lam) (closed-form structure of [14]).
+    lam minimises the expected aggregation-MSE proxy
+        J(lam) = E[(lam/(x+lam))^2]/K + sigma2 E[x/(x+lam)^2] / (2 K^2 p_avg),  x = |c_hat|^2 ~ Exp(var_h),
+    and c meets the average power budget E[c^2 x/(x+lam)^2] = p_avg with equality."""
+    from scipy.integrate import quad
+    from scipy.optimize import minimize_scalar
+    pdf = lambda x: np.exp(-x / var_h) / var_h
+    E = lambda f: quad(lambda x: f(x) * pdf(x), 0, np.inf, limit=200)[0]
+    def J(loglam):
+        lam = np.exp(loglam)
+        bias = E(lambda x: (lam / (x + lam)) ** 2)
+        pw = E(lambda x: x / (x + lam) ** 2)
+        return bias / Kdev + sigma2 * pw / (2 * Kdev ** 2 * p_avg)
+    res = minimize_scalar(J, bounds=(np.log(1e-6), np.log(1e3)), method="bounded", options=dict(xatol=1e-4))
+    lam = float(np.exp(res.x))
+    c = float(np.sqrt(p_avg / E(lambda x: x / (x + lam) ** 2)))
+    return lam, c
+
+
+# ------------------------------------------------- [10]: Theorem 1 of Zhang & Tao
+def z10_policy(C, beta, N0):
+    """Optimal aggregation levels G_k and sqrt(eta) of problem P1 in [10] (Theorem 1),
+    for normalised MSE  beta/(beta+1) sum (G_k-1)^2 + 1/(beta+1) (sum G_k - K)^2 + N0/eta,
+    with G_k <= C_k / sqrt(eta).  Returns (G, sqrt_eta)."""
+    Kd = len(C)
+    order = np.argsort(C); Cs = C[order]
+    best = None
+    cs1, cs2 = np.cumsum(Cs), np.cumsum(Cs ** 2)
+    for l in range(1, Kd + 1):
+        s1, s2, m = cs1[l - 1], cs2[l - 1], Kd - l
+        num = beta / (beta + 1) * s2 + beta * s1 ** 2 / ((beta + 1) * (beta + m)) + N0
+        den = beta * (beta + Kd) * s1 / ((beta + m) * (beta + 1))
+        sq = num / den; x = 1.0 / sq
+        if m > 0:
+            G0 = (beta + Kd - x * s1) / (beta + m)
+            if G0 < 0 or not (G0 < Cs[l] * x):
+                continue
+            Gs = np.concatenate([Cs[:l] * x, np.full(m, G0)])
+        else:
+            Gs = Cs * x
+        V = beta / (beta + 1) * np.sum((Gs - 1) ** 2) + (Gs.sum() - Kd) ** 2 / (beta + 1) + N0 * x * x
+        if best is None or V < best[0]:
+            best = (V, sq, Gs)
+    _, sq, Gs = best
+    G = np.empty(Kd); G[order] = Gs
+    return G, sq
+
+
 def mmse_estimate(h, eps, rng):
     """Device-side MMSE channel estimate: h = h_hat + e, e ~ CN(0, eps)."""
     if eps <= 0:
@@ -136,10 +374,11 @@ def beamformer(Hh, thr, iters=40, tau=6.0, mu=0.5):
 
 
 # ----------------------------------------------------------- one OTA round
-def ota_round(G, c, c_hat, method, thr, snr_db, rng):
+def ota_round(G, c, c_hat, method, thr, snr_db, rng, eps=0.0, part_mask=None):
     """
     G : (K, d) true local gradients
     c, c_hat : (K,) true / estimated effective scalar channels
+    part_mask : participating set chosen outside (used by Y4)
     Returns g_hat, info
     """
     if NORM:   # unit-power symbols: each device scales by its own rho_k, side information reaches the server error-free
@@ -151,14 +390,18 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng):
     sigma2 = P_MAX / (10 ** (snr_db / 10))
     gain = np.abs(c_hat)
     pw = np.sum(S ** 2, 1) / D                    # per-element symbol power
-    if method in ("M2", "M3", "M2-EIG"):
+    if part_mask is not None:
+        part = np.asarray(part_mask, bool)
+    elif method in ("M2", "M3", "M2-EIG"):
         part = gain >= thr
-    else:                                         # M1, M1-BF, OPT
+    else:                                         # M1, M1-BF, OPT, RCI, C22, Z10, Y14
         part = np.ones(K, bool)
     n_part = int(part.sum())
     if n_part == 0:
-        return np.zeros(D), dict(part=0.0, power=0.0, noise_var=0.0, rx_snr_db=float("nan"))
+        return np.zeros(D), dict(part=0.0, power=0.0, peak=0.0, noise_var=0.0, rx_snr_db=float("nan"),
+                                 sqrt_eta=float("nan"))
     b = np.zeros(K, complex)
+    scale = None                                  # server multiplier on Re(y) when it is not rho_bar/(|S| sqrt_eta)
     if method == "C22":
         # Case I policy of Cao et al. [12] with the maximum-power constraint (dual variables = 0):
         # every device transmits, received amplitude m_k = min(c, a_k), a_k = |c_hat_k| sqrt(P_MAX/pi_k);
@@ -191,17 +434,44 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng):
         sqrt_eta = grid[int(np.argmin(J))]
         mag = np.minimum(sqrt_eta / gain, np.sqrt(P_MAX / pw))
         b = mag * np.conj(c_hat) / gain
-    else:
+    elif method == "Z10":
+        # Zhang & Tao [10], Theorem 1: devices normalise by the common mean squared gradient norm alpha,
+        # the server knows alpha and the squared coefficient of variation beta of the gradients
+        # (error-free side information, as for rho_k) and all channel amplitudes.
+        alpha = float(np.mean(np.sum(G ** 2, 1)))
+        m_d = G.mean(0)
+        beta = float(G.var(0).sum() / max(float(m_d @ m_d), 1e-30))
+        S = G * np.sqrt(D / alpha)
+        pw = np.sum(S ** 2, 1) / D
+        Cap = gain * np.sqrt(P_MAX / pw)
+        Gk, sqrt_eta = z10_policy(Cap, beta, sigma2 / 2.0)
+        b = Gk * sqrt_eta * np.conj(c_hat) / gain ** 2
+        scale = np.sqrt(alpha / D) / (K * sqrt_eta)
+    elif method == "Y14":
+        # closed-form structure of Yu et al. [14]: |b(g)| = c g/(g^2 + lam), constants from the fading statistics,
+        # long-term average power budget P_MAX (no per-round peak limit, as in [14]).
+        lam, cc = y14_design(round(sigma2, 12), round(1.0 - eps, 12), K, P_MAX)
+        b = cc * np.conj(c_hat) / (gain ** 2 + lam)
+        sqrt_eta = cc
+    else:                                          # M1, M2, M3, M1-BF, M2-EIG, Y4: channel inversion on the set
         sqrt_eta = np.min(np.sqrt(P_MAX / pw[part]) * gain[part])
         b[part] = sqrt_eta * np.conj(c_hat[part]) / gain[part] ** 2
     y = (c[part] * b[part]) @ S[part] + cn(rng, D, sigma2)   # superposition
     rho_bar = float(np.mean(rho_k[part]))
-    g_hat = rho_bar * np.real(y) / (n_part * sqrt_eta)
-    tx_power = float(np.mean(np.abs(b[part]) ** 2 * pw[part]))
-    noise_var = rho_bar ** 2 * D * sigma2 / 2.0 / (n_part * sqrt_eta) ** 2
+    if DEBIAS:     # unit-gain normalisation: divide by the sum of the estimated received amplitudes
+        amp_sum = float(np.sum(np.abs(c_hat[part] * b[part])))
+        scale = (np.sqrt(alpha / D) if method == "Z10" else rho_bar) / amp_sum
+    if scale is None:
+        g_hat = rho_bar * np.real(y) / (n_part * sqrt_eta)
+        noise_var = rho_bar ** 2 * D * sigma2 / 2.0 / (n_part * sqrt_eta) ** 2
+    else:
+        g_hat = scale * np.real(y)
+        noise_var = scale ** 2 * D * sigma2 / 2.0
+    p_dev = np.abs(b[part]) ** 2 * pw[part]
+    tx_power = float(np.mean(p_dev))
     rx = float(np.mean(np.abs(c[part] * b[part]) ** 2 * pw[part]) / sigma2)   # realised receive SNR per device
-    return g_hat, dict(part=n_part / K, power=tx_power / P_MAX, noise_var=noise_var,
-                       rx_snr_db=10 * np.log10(rx))
+    return g_hat, dict(part=n_part / K, power=tx_power / P_MAX, peak=float(p_dev.max()) / P_MAX,
+                       noise_var=noise_var, rx_snr_db=10 * np.log10(rx), sqrt_eta=float(sqrt_eta))
 
 
 # ------------------------------------------------------------------- one run
@@ -211,35 +481,38 @@ def run(method, snr_db, seed, thr=0.3, eps=0.0, rounds=ROUNDS, block=TEST_SLICE,
     rng = np.random.default_rng(2000 + seed)
     parts = partition(ytr, K, DIRICHLET_ALPHA, rng)
     w = np.zeros(D)
-    # channels: P1 trace for N=1 ; same recipe with N_RX columns for M3
-    if method in ("M3", "M1-BF", "M2-EIG"):
-        crng = np.random.default_rng(P1_SEED + seed + 77)
-        Hall = cn(crng, (500, K, N_RX), 1.0)[block]
-    else:
-        Hall = p1_channels(seed)[block]
+    # channels: P1 trace for N=1 ; same recipe with N_RX columns for the multi-antenna methods
+    Hall = channel_trace(method, seed)[block]
     est_rng = np.random.default_rng(3000 + seed)
     noise_rng = np.random.default_rng(4000 + seed)
-    log = dict(acc=[], mse=[], part=[], power=[], noise_var=[], bias2=[], rx_snr_db=[])
+    y4 = y4_trace(seed, thr, eps, block) if (method == "Y4" and not ideal) else None
+    log = dict(acc=[], mse=[], part=[], power=[], peak=[], noise_var=[], rx_snr_db=[], sqrt_eta=[], proj=[], cos=[])
     for t in range(rounds):
         G = np.stack([grad(w, Xtr[p], ytr[p]) for p in parts])
         g_bar = G.mean(0)
+        pm = None
         if ideal:
-            g_hat, info = g_bar, dict(part=1.0, power=0.0, noise_var=0.0, rx_snr_db=float("nan"))
+            g_hat, info = g_bar, dict(part=1.0, power=0.0, peak=0.0, noise_var=0.0, rx_snr_db=float("nan"),
+                                      sqrt_eta=float("nan"))
         else:
             H = Hall[t]
             if H.ndim == 1:
                 c, c_hat = H, mmse_estimate(H, eps, est_rng)
             else:
                 Hh = mmse_estimate(H, eps, est_rng)
-                a = beamformer(Hh, thr, iters=(0 if method == "M2-EIG" else 40))
+                if method == "Y4":           # thr is the threshold h_th on |a^H h_hat|, i.e. gamma = 1/h_th^2
+                    pm, a = y4[t]
+                else:
+                    a = beamformer(Hh, thr, iters=(0 if method == "M2-EIG" else 40))
                 c, c_hat = H @ a.conj(), Hh @ a.conj()
-            g_hat, info = ota_round(G, c, c_hat, method, thr, snr_db, noise_rng)
+            g_hat, info = ota_round(G, c, c_hat, method, thr, snr_db, noise_rng, eps=eps, part_mask=pm)
         err = g_hat - g_bar
         log["mse"].append(float(err @ err))
-        log["part"].append(info["part"])
-        log["power"].append(info["power"])
-        log["noise_var"].append(info["noise_var"])
-        log["rx_snr_db"].append(info.get("rx_snr_db", float("nan")))
+        gg = max(float(g_bar @ g_bar), 1e-30)
+        log["proj"].append(float(g_hat @ g_bar) / gg)   # shrinkage of the estimate along g_bar
+        log["cos"].append(float(g_hat @ g_bar) / np.sqrt(gg * max(float(g_hat @ g_hat), 1e-30)))
+        for k in ("part", "power", "peak", "noise_var", "rx_snr_db", "sqrt_eta"):
+            log[k].append(info.get(k, float("nan")))
         w = w - LR * g_hat
         log["acc"].append(accuracy(w, Xte, yte))
     return log
