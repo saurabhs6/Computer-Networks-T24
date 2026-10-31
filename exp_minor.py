@@ -24,6 +24,8 @@ def job(m, deb, **kw):
 
 def jobs_lrtune():
     J = [dict(method="M1", snr=REF, seed=s, thr=0.0, ideal=True, block="train", lr=lr) for lr in LR_GRID for s in range(5)]
+    # M1 kept improving towards small rates, so its grid goes two steps lower
+    J += [dict(method="M1", snr=REF, seed=s, thr=0.0, block="train", lr=lr, debias=False) for lr in (0.0625, 0.125) for s in range(5)]
     for lab, m, deb in POL:
         J += [job(m, deb, snr=REF, seed=s, block="train", lr=lr) for lr in LR_GRID for s in range(5)]
     return J
