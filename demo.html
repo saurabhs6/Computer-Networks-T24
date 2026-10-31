@@ -206,7 +206,7 @@ footer h4{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--fg)}
 
 <footer>
   <div><h4>Setup</h4><p>scikit-learn digits (1,347 train / 450 test), softmax regression, K = 50 devices, Dirichlet 0.5 label skew, channel realisations 400–499 for reporting. Symbols have unit power, so the SNR is the per-device transmit SNR; the server adds about 30 dB of coherent gain, which is why the interesting range is −45 to −25 dB. Accuracy is the mean of the last ten rounds over ten seeds.</p></div>
-  <div><h4>Policies</h4><p>OPT follows the threshold structure of Cao et al. (2020), C12 the Case I policy of Cao et al. (2022), Z10 Theorem 1 of Zhang and Tao (2021), Y14 the structure described for Yu et al. (2023), and Y4 the device selection of Yang et al. (2020). All are our re-implementations, with tuned or replaced constants, not the authors' code. The suffix U means unit-gain normalisation: the server divides by the sum of the received amplitudes.</p></div>
+  <div><h4>Policies</h4><p>OPT follows the threshold structure of Cao et al. (2020), C12 the Case I policy of Cao et al. (2022), Z10 Theorem 1 of Zhang and Tao (2021), and Y4 the device selection of Yang et al. (2020); these are our re-implementations, with tuned or replaced constants. Y14 is our own policy inspired by Yu et al. (2023). The suffix U means unit-gain normalisation: the server divides by the sum of the received amplitudes.</p></div>
 </footer>
 </div>
 
@@ -227,7 +227,7 @@ const METHODS = [
   {id:'C12',   name:'C12',    long:'Policy of Cao et al. [12], Case I', key:'C12'},
   {id:'Z10',   name:'Z10',    long:'Theorem 1 of Zhang and Tao [10]', key:'Z10'},
   {id:'Z10-U', name:'Z10-U',  long:'Z10 with unit-gain normalisation', key:'Z10-U'},
-  {id:'Y14',   name:'Y14',    long:'Structure of Yu et al. [14]', key:'Y14'},
+  {id:'Y14',   name:'Y14',    long:'Inspired by Yu et al. [14]', key:'Y14'},
   {id:'Y14-U', name:'Y14-U',  long:'Y14 with unit-gain normalisation', key:'Y14-U'},
 ];
 const on = Object.fromEntries(METHODS.map(m=>[m.id, ['M1','M2','M3','OPT','OPT-U','C12'].includes(m.id)]));
@@ -344,7 +344,7 @@ function pShrink(){const i=st.snr;const rows=sel().map(m=>{const d=D.E[m.key];re
   return `<div class="two"><div class="card"><h3>Shrinkage factor ⟨ĝ, ḡ⟩/‖ḡ‖² against SNR</h3><p class="note">How much of the true gradient survives in the aggregate. A value below 1 works like a smaller learning rate. With unit-power symbols even a noiseless round gives about 0.87, because every participating gradient enters the sum with the same norm.</p><div id="ch1"></div></div>
   <div class="card"><h3>At ${SN(SNRS[i])} dB <span class="badge">move the SNR slider</span></h3>
   <div class="tblwrap"><table><tr><th>Method</th><th>Acc. %</th><th>MSE</th><th>Shrinkage</th></tr>${rows}</table></div>
-  <p class="note" style="margin-top:12px">Turn on OPT, Z10 or Y14 and their U variants: the U variant keeps the power control and only rescales the aggregate.</p></div></div>`}
+  <p class="note" style="margin-top:12px">Turn on OPT, Z10 or Y14 and their U variants: the U variant keeps the power control and only rescales the aggregate. A learning rate tuned for each policy has a similar effect (Table 5 of the paper).</p></div></div>`}
 function pFixed(){const F=D.FX,i=st.snr,s=SNRS[i],j=F.snrs.indexOf(s),ids=['M1','M2','M3','M2-EIG','M1-BF','OPT','RCI','C12'];
   const rows=ids.map(id=>{const a=D.E[id],b=F[id];return `<tr><td><span class="sw" style="--c:${col(id)}"></span>${METHODS.find(m=>m.id===id).name}</td><td class="num">${j<0?'–':pct(b.acc[j])} / ${pct(a.acc[i])}</td><td class="num">${j<0?'–':fmtMSE(b.mse[j])} / ${fmtMSE(a.mse[i])}</td></tr>`}).join('');
   return `<div class="two"><div class="card"><h3>Fixed scaling against unit-power symbols <span class="badge">solid = unit power, dashed = fixed ρ = 0.1</span></h3>
@@ -362,8 +362,8 @@ function pFade(){const c=st.ch;return `<div class="two"><div class="card"><h3>On
 
 
 /* ---------- render ---------- */
-const REF={overview:'Table 3, Sections 4.1 to 4.4',accuracy:'Figure 2, Table 3',mse:'Figures 4 and 7',curves:'Figure 3',threshold:'Figure 9, Table 8',
-  csi:'Figure 8, Table 7',shrink:'Figure 5, Section 4.2',big:'Tables 9 and 10, Figure 10',fixed:'Table 11, Section 4.8',fade:'Eqs. (6), (8) and (9)'};
+const REF={overview:'Table 3, Sections 4.1 to 4.4',accuracy:'Figure 2, Table 3',mse:'Figures 4 and 7',curves:'Figure 3',threshold:'Figure 9, Table 9',
+  csi:'Figure 8, Table 8',shrink:'Figure 5, Table 5',big:'Tables 10 and 11, Figure 10',fixed:'Table 12, Section 4.8',fade:'Eqs. (6), (8) and (9)'};
 const PANELS={overview:pOverview,accuracy:pAccuracy,mse:pMse,curves:pCurves,threshold:pThreshold,csi:pCsi,shrink:pShrink,big:pBig,fixed:pFixed,fade:pFade};
 function render(){
   $('#snrOut').textContent=String(SNRS[st.snr]).replace('-','−')+' dB';

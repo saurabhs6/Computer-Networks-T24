@@ -62,15 +62,16 @@ ax.set_xlabel("Communication round"); ax.set_ylabel("Test accuracy (%)"); ax.set
 ax.legend(ncol=2, loc="center right", bbox_to_anchor=(1.0, 0.42)); fig.tight_layout(); fig.savefig(f"{OUT}/fig_curves.png", dpi=200); plt.close(fig)
 
 # Fig 4: aggregation MSE vs SNR, mean and median
-fig, ax = plt.subplots(figsize=(5.6, 3.6))
-for m in ["M1", "M2", "M3", "C22", "OPT", "Z10"]:
+fig, ax = plt.subplots(figsize=(5.6, 4.3))
+for m in ["M1", "M2", "M3", "C22", "OPT", "Z10", "Y14"]:
     c, ls, mk = STY[m]
     mu = [NV.F(M, (m, s), "mse_mean") for s in SNRS]
     md = [NV.F(M, (m, s), "mse_med") for s in SNRS]
     ax.semilogy(SNRS, mu, color=c, ls="-", marker=mk, ms=3.3, lw=1.1, label=f"{nm(m)} mean")
     ax.semilogy(SNRS, md, color=c, ls=":", marker=mk, ms=3.3, mfc="none", lw=1.0, label=f"{nm(m)} median")
 ax.set_xlabel("Per-device transmit SNR (dB)"); ax.set_ylabel("Aggregation MSE per round")
-ax.legend(ncol=3, fontsize=6.0); fig.tight_layout(); fig.savefig(f"{OUT}/fig_mse.png", dpi=200); plt.close(fig)
+ax.legend(ncol=4, fontsize=6.0, loc="upper center", bbox_to_anchor=(0.5, -0.17), frameon=False)
+fig.tight_layout(); fig.savefig(f"{OUT}/fig_mse.png", dpi=200); plt.close(fig)
 
 # Fig 5: accuracy against MSE and against shrinkage at the reference SNR
 fig, axs = plt.subplots(1, 2, figsize=(8.6, 3.3), sharey=True)

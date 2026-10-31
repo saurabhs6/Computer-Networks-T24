@@ -19,7 +19,7 @@ All policies run on the same data and channels, with unit-power symbols, so the 
 | `RCI` | RCI | regularised channel inversion with a tuned regulariser |
 | `C22` | C12 | Case I policy of Cao et al. 2022 [12] |
 | `Z10` | Z10 | Theorem 1 of Zhang and Tao 2021 [10] |
-| `Y14` | Y14 | policy with the structure described for Yu et al. 2023 [14] |
+| `Y14` | Y14 | our own policy inspired by Yu et al. 2023 [14] (not a re-implementation) |
 | `Y4` | Y4 | device selection and beamforming of Yang et al. 2020 [4] (DC algorithm) |
 | `debias=True` | suffix U | unit-gain normalisation: the server divides by the sum of the received amplitudes |
 
@@ -43,6 +43,7 @@ Simulator and experiments (digits task, run from this folder):
 - `exp_tune.py` - tuning of the thresholds and constants on rounds 0-99 (writes `v3/tune.jsonl`)
 - `exp_main.py <stage>` - main experiments; stages `main`, `csi`, `thr`, `rule`, `jakes`, `alpha`, `n8tune`, `n8`, `debias`, `uvar` (writes `v3/<stage>.jsonl`)
 - `y4_pre.py`, `exp_y4.py` - the Y4 selections (cached in `y4cache/`) and the Y4 runs
+- `exp_minor.py <stage>` - minor corrections: per-policy learning rate (`lrtune`, `lrrun`), common scaling g_k/rho_max (`rhomax`), peak-limited Y14 (`y14cap`) and U variants with a noisy pilot (`pilot`)
 - `check_z10.py` - checks the closed form of Z10 against a direct numerical optimum
 - `demo.py` - quick check, about 20 seconds: the main policies at -35 dB with three seeds
 
@@ -73,6 +74,7 @@ Results:
     N8_THR=0.7 python exp_main.py n8
     python y4_pre.py tune && python exp_y4.py tune
     Y4_THR=0.9 python y4_pre.py test && Y4_THR=0.9 python exp_y4.py run
+    for s in lrtune lrrun rhomax y14cap pilot; do python exp_minor.py $s 2; done
     python mnist_v3.py tune 2 && C22_TAU=0.8 python mnist_v3.py main 2
     python cifar_v3.py lr && CIFAR_LR=0.2 python cifar_v3.py tune
     CIFAR_LR=0.2 C22_TAU=1.2 python cifar_v3.py main

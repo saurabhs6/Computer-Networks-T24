@@ -29,7 +29,20 @@ def paired_ci(a, b, level=0.95):
     d = np.array([a[s] - b[s] for s in seeds], float)
     n = len(d); m = float(d.mean()); s = float(d.std(ddof=1))
     h = float(stats.t.ppf(0.5 + level / 2, n - 1) * s / math.sqrt(n))
-    return dict(n=n, diff=m, lo=m - h, hi=m + h, within_noise=bool(m - h <= 0 <= m + h))
+    p = float(2 * stats.t.sf(abs(m) / (s / math.sqrt(n)), n - 1)) if s > 0 else (0.0 if m != 0 else 1.0)
+    return dict(n=n, diff=m, lo=m - h, hi=m + h, within_noise=bool(m - h <= 0 <= m + h), p=p)
+
+
+def holm(pvals, alpha=0.05):
+    """Holm-Bonferroni step-down: list of booleans, True where the hypothesis is rejected (family-wise error alpha)."""
+    order = sorted(range(len(pvals)), key=lambda i: pvals[i])
+    rej = [False] * len(pvals); m = len(pvals)
+    for rank, i in enumerate(order):
+        if pvals[i] <= alpha / (m - rank):
+            rej[i] = True
+        else:
+            break
+    return rej
 
 
 def per_seed(rows, field="acc10", scale=100.0):

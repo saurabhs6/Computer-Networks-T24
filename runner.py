@@ -6,10 +6,14 @@ import ota_fl_sim as S
 
 DEFAULT = dict(norm=True, kappa=10.0, eps=0.0, block="test", n_rx=4, fd=0.0, alpha=0.5, K=50, curve=False, ideal=False,
                debias=False)
+EXTRA = dict(lr=1.0, scaling="mean", y14cap=False, pilot=False)   # options added for the minor corrections
+
+
 
 
 def key(j):
     j = {**DEFAULT, **j}
+    j = {k: v for k, v in j.items() if not (k in EXTRA and v == EXTRA[k])}   # old result files keep their keys
     return json.dumps({k: j[k] for k in sorted(j) if k not in ("curve",)}, sort_keys=True)
 
 
@@ -42,6 +46,8 @@ def work(j):
     j = {**DEFAULT, **j}
     S.NORM, S.C22_KAPPA, S.N_RX, S.JAKES_FD, S.DIRICHLET_ALPHA, S.K = j["norm"], j["kappa"], j["n_rx"], j["fd"], j["alpha"], j["K"]
     S.DEBIAS = j["debias"]
+    x = {**EXTRA, **j}
+    S.LR, S.SCALING, S.Y14_CAP, S.PILOT = x["lr"], x["scaling"], x["y14cap"], x["pilot"]
     blk = S.TRAIN_SLICE if j["block"] == "train" else S.TEST_SLICE
     log = S.run(j["method"], j["snr"], j["seed"], j["thr"], j["eps"], block=blk, ideal=j["ideal"])
     return dict(job=j, **summarise(log, j["curve"]))

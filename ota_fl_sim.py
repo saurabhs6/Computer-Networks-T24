@@ -65,6 +65,10 @@ P1_SEED = 42           # seed of the shared P1 channel trace
 DIRICHLET_ALPHA = 0.5  # label skew across devices
 JAKES_FD = 0.0         # 0: i.i.d. block fading; >0: Gauss-Markov fading with Jakes correlation
 DEBIAS = False         # True: the server divides by the sum of the (estimated) received amplitudes instead of K*sqrt(eta)
+SCALING = "mean"       # unit power: "mean" -> s_k = g_k/rho_k, server multiplies by mean(rho_k); "max" -> common s_k = g_k/rho_max
+Y14_CAP = False        # True: Y14 also respects the per-round peak limit |b_k|^2 pi_k <= P_MAX
+PILOT = False          # True (with DEBIAS): the amplitude sum is measured with one noisy pilot symbol through the true channel
+PILOT_RNG = None
 Y4_SOLVER = "CLARABEL"
 
 # ---------------------------------------------------------------------- data
@@ -381,7 +385,11 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng, eps=0.0, part_mask=None):
     part_mask : participating set chosen outside (used by Y4)
     Returns g_hat, info
     """
-    if NORM:   # unit-power symbols: each device scales by its own rho_k, side information reaches the server error-free
+    if NORM and SCALING == "max":   # common scaling by the largest norm: unbiased, symbol power below 1 for most devices
+        rho_c = float(np.sqrt(np.sum(G ** 2, 1) / D).max()) + 1e-12
+        rho_k = np.full(K, rho_c)
+        S = G / rho_c
+    elif NORM:   # unit-power symbols: each device scales by its own rho_k, side information reaches the server error-free
         rho_k = np.sqrt(np.sum(G ** 2, 1) / D) + 1e-12
         S = G / rho_k[:, None]
     else:
@@ -452,6 +460,8 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng, eps=0.0, part_mask=None):
         # long-term average power budget P_MAX (no per-round peak limit, as in [14]).
         lam, cc = y14_design(round(sigma2, 12), round(1.0 - eps, 12), K, P_MAX)
         b = cc * np.conj(c_hat) / (gain ** 2 + lam)
+        if Y14_CAP:                            # per-round peak limit, as for every other policy
+            b = b * np.minimum(1.0, np.sqrt(P_MAX / (np.abs(b) ** 2 * pw)))
         sqrt_eta = cc
     else:                                          # M1, M2, M3, M1-BF, M2-EIG, Y4: channel inversion on the set
         sqrt_eta = np.min(np.sqrt(P_MAX / pw[part]) * gain[part])
@@ -460,6 +470,8 @@ def ota_round(G, c, c_hat, method, thr, snr_db, rng, eps=0.0, part_mask=None):
     rho_bar = float(np.mean(rho_k[part]))
     if DEBIAS:     # unit-gain normalisation: divide by the sum of the estimated received amplitudes
         amp_sum = float(np.sum(np.abs(c_hat[part] * b[part])))
+        if PILOT:   # one pilot symbol sent with the precoders through the true channel: |sum_k c_k b_k + n|
+            amp_sum = float(np.abs(np.sum(c[part] * b[part]) + cn(PILOT_RNG, 1, sigma2)[0]))
         scale = (np.sqrt(alpha / D) if method == "Z10" else rho_bar) / amp_sum
     if scale is None:
         g_hat = rho_bar * np.real(y) / (n_part * sqrt_eta)
@@ -485,6 +497,8 @@ def run(method, snr_db, seed, thr=0.3, eps=0.0, rounds=ROUNDS, block=TEST_SLICE,
     Hall = channel_trace(method, seed)[block]
     est_rng = np.random.default_rng(3000 + seed)
     noise_rng = np.random.default_rng(4000 + seed)
+    global PILOT_RNG
+    PILOT_RNG = np.random.default_rng(5000 + seed)
     y4 = y4_trace(seed, thr, eps, block) if (method == "Y4" and not ideal) else None
     log = dict(acc=[], mse=[], part=[], power=[], peak=[], noise_var=[], rx_snr_db=[], sqrt_eta=[], proj=[], cos=[])
     for t in range(rounds):
